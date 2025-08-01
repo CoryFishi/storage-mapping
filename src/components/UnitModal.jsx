@@ -1,14 +1,21 @@
 import { useState } from "react";
 
+const PX_PER_FT = 5;
+
 export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
   const [newUnit, setNewUnit] = useState({ ...unit });
-
+  const toFeetDisplay = (px) => {
+    return Math.round((px / PX_PER_FT) * 10) / 10;
+  };
   // update helpers
   const handleChange = (field) => (e) => {
     const raw = e.target.value;
     if (["width", "height", "x", "y"].includes(field)) {
-      const int = parseInt(raw, 10) || 0;
-      setNewUnit((prev) => ({ ...prev, [field]: int * 10 }));
+      const val = parseFloat(raw);
+      if (isNaN(val)) return;
+      // convert feet → pixels
+      const px = Math.round(val * PX_PER_FT);
+      setNewUnit((prev) => ({ ...prev, [field]: px }));
     } else {
       setNewUnit((prev) => ({ ...prev, [field]: raw }));
     }
@@ -53,7 +60,7 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
             <label className="w-1/3 text-center">Width</label>
             <input
               type="number"
-              value={newUnit.width / 10}
+              value={toFeetDisplay(newUnit.width)}
               onChange={handleChange("width")}
               className="border rounded px-2 py-1 w-2/3"
             />
@@ -64,7 +71,7 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
             <label className="w-1/3 text-center">Height</label>
             <input
               type="number"
-              value={newUnit.height / 10}
+              value={toFeetDisplay(newUnit.height)}
               onChange={handleChange("height")}
               className="border rounded px-2 py-1 w-2/3"
             />
@@ -75,7 +82,7 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
             <label className="w-1/3 text-center">X Pos</label>
             <input
               type="number"
-              value={newUnit.x / 10}
+              value={toFeetDisplay(newUnit.x)}
               onChange={handleChange("x")}
               className="border rounded px-2 py-1 w-2/3"
             />
@@ -86,7 +93,7 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
             <label className="w-1/3 text-center">Y Pos</label>
             <input
               type="number"
-              value={newUnit.y / 10}
+              value={toFeetDisplay(newUnit.y)}
               onChange={handleChange("y")}
               className="border rounded px-2 py-1 w-2/3"
             />
@@ -110,6 +117,8 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
                 const active = newUnit.doors?.some((d) => d.side === side);
 
                 // square doesn't get a hypotenuse side
+                if (newUnit.shape === "Square" && side === "hypotenuse")
+                  return null;
                 if (newUnit.shape === "square" && side === "hypotenuse")
                   return null;
 

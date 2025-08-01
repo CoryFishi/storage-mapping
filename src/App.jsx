@@ -8,7 +8,7 @@ function App() {
   const [params, setParams] = useState({
     baseInCone: 150,
     baseOutCone: 55,
-    crossPenalty: 35,
+    crossPenalty: 50,
     halfConeDeg: 30,
   });
   const [unitModalUnit, setUnitModalUnit] = useState({});
