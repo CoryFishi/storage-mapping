@@ -24,8 +24,13 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
     });
   };
 
-  const sides = ["top", "right", "bottom", "left"];
-
+  const sides = ["top", "right", "bottom", "left", "hypotenuse"];
+  const TRIANGLE_ALLOWED = {
+    nw: ["top", "left", "hypotenuse"],
+    ne: ["top", "right", "hypotenuse"],
+    se: ["bottom", "right", "hypotenuse"],
+    sw: ["bottom", "left", "hypotenuse"],
+  };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-96 bg-white rounded p-4 border">
@@ -103,18 +108,25 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
             <div className="flex justify-center gap-2">
               {sides.map((side) => {
                 const active = newUnit.doors?.some((d) => d.side === side);
+
+                // square doesn't get a hypotenuse side
+                if (newUnit.shape === "square" && side === "hypotenuse")
+                  return null;
+
+                // triangle: only allow sides valid for its orientation
+                if (newUnit.shape === "rightTriangle") {
+                  const orient = newUnit.orientation || "nw"; // default if missing
+                  if (!TRIANGLE_ALLOWED[orient]?.includes(side)) return null;
+                }
+
                 return (
                   <button
                     key={side}
                     onClick={() => toggleDoor(side)}
                     className={`
-                      px-3 py-1 border rounded
-                      ${
-                        active
-                          ? "bg-blue-600 text-white"
-                          : "bg-gray-200 text-gray-700"
-                      }
-                    `}
+        px-3 py-1 border rounded
+        ${active ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}
+      `}
                   >
                     {side.charAt(0).toUpperCase() + side.slice(1)}
                   </button>

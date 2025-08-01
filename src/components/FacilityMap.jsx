@@ -13,144 +13,7 @@ import {
 } from "react-konva";
 import { v4 as uuid } from "uuid";
 
-const BASE_IN_CONE = 500; // ft
-const BASE_OUT_CONE = 250; // ft
-const CROSS_PENALTY = 140; // ft per crossed unit
-const HALF_CONE_DEG = 30; // half-angle
-const COS30 = Math.cos((HALF_CONE_DEG * Math.PI) / 180); // ≈0.866
-
-// Map door side to a unit-vector normal
-const NORMALS = {
-  top: { x: 0, y: -1 },
-  bottom: { x: 0, y: 1 },
-  left: { x: -1, y: 0 },
-  right: { x: 1, y: 0 },
-};
-
-function segmentIntersectsRect(p1, p2, rect, margin = 1) {
-  const rx = rect.x + margin;
-  const ry = rect.y + margin;
-  const rw = rect.width - margin * 2;
-  const rh = rect.height - margin * 2;
-  const minX = rx,
-    maxX = rx + rw;
-  const minY = ry,
-    maxY = ry + rh;
-
-  // trivial reject
-  if (
-    (p1.x < minX && p2.x < minX) ||
-    (p1.x > maxX && p2.x > maxX) ||
-    (p1.y < minY && p2.y < minY) ||
-    (p1.y > maxY && p2.y > maxY)
-  ) {
-    return false;
-  }
-
-  // helper to test two segments for intersection
-  function segIntersect(a, b, c, d) {
-    const orient = (p, q, r) =>
-      (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
-    const o1 = orient(a, b, c),
-      o2 = orient(a, b, d);
-    const o3 = orient(c, d, a),
-      o4 = orient(c, d, b);
-
-    // collinearity + on-segment checks
-    if (
-      o1 === 0 &&
-      Math.min(a.x, b.x) <= c.x &&
-      c.x <= Math.max(a.x, b.x) &&
-      Math.min(a.y, b.y) <= c.y &&
-      c.y <= Math.max(a.y, b.y)
-    )
-      return true;
-    if (
-      o2 === 0 &&
-      Math.min(a.x, b.x) <= d.x &&
-      d.x <= Math.max(a.x, b.x) &&
-      Math.min(a.y, b.y) <= d.y &&
-      d.y <= Math.max(a.y, b.y)
-    )
-      return true;
-    if (
-      o3 === 0 &&
-      Math.min(c.x, d.x) <= a.x &&
-      a.x <= Math.max(c.x, d.x) &&
-      Math.min(c.y, d.y) <= a.y &&
-      a.y <= Math.max(c.y, d.y)
-    )
-      return true;
-    if (
-      o4 === 0 &&
-      Math.min(c.x, d.x) <= b.x &&
-      b.x <= Math.max(c.x, d.x) &&
-      Math.min(c.y, d.y) <= b.y &&
-      b.y <= Math.max(c.y, d.y)
-    )
-      return true;
-
-    return o1 > 0 !== o2 > 0 && o3 > 0 !== o4 > 0;
-  }
-
-  // check each of the four edges
-  const corners = [
-    { x: minX, y: minY },
-    { x: maxX, y: minY },
-    { x: maxX, y: maxY },
-    { x: minX, y: maxY },
-  ];
-  for (let i = 0; i < 4; i++) {
-    if (segIntersect(p1, p2, corners[i], corners[(i + 1) % 4])) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// Returns true if A and B can talk
-function canTalk(lockA, lockB, units) {
-  const dx = lockB.x - lockA.x,
-    dy = lockB.y - lockA.y;
-  const dist = Math.hypot(dx, dy);
-
-  let crosses = 0;
-  for (const u of units) {
-    const insideB =
-      lockB.x >= u.x &&
-      lockB.x <= u.x + u.width &&
-      lockB.y >= u.y &&
-      lockB.y <= u.y + u.height;
-    if (insideB) continue;
-
-    if (
-      segmentIntersectsRect(
-        { x: lockA.x, y: lockA.y },
-        { x: lockB.x, y: lockB.y },
-        { x: u.x, y: u.y, width: u.width, height: u.height }
-      )
-    ) {
-      crosses++;
-    }
-  }
-  const penalty = crosses * CROSS_PENALTY;
-  function adjRange(from, to) {
-    const n = NORMALS[from.side];
-    const vx = to.x - from.x,
-      vy = to.y - from.y;
-    const dot = vx * n.x + vy * n.y;
-    const inFront = dot > 0 && dot / Math.hypot(vx, vy) >= COS30;
-    const base = inFront ? BASE_IN_CONE : BASE_OUT_CONE;
-    return base - penalty;
-  }
-
-  return (
-    dist <= adjRange(lockA, lockB, units) &&
-    dist <= adjRange(lockB, lockA, units)
-  );
-}
-const gridSize = 25;
-const snap = (v) => Math.round(v / gridSize) * gridSize;
+const PX_PER_FT = 5;
 
 export default function FacilityMap({
   layout,
@@ -158,6 +21,8 @@ export default function FacilityMap({
   onUpdate,
   setIsUnitModalOpen,
   setLayout,
+  params,
+  cosHalfAngle,
 }) {
   const [selectedId, setSelectedId] = useState(null);
   const [proximityPairs, setProximityPairs] = useState([]);
@@ -172,59 +37,210 @@ export default function FacilityMap({
   const stageRef = useRef();
   const [clipboard, setClipboard] = useState(null);
   const [limitNearest, setLimitNearest] = useState(true);
+  // Map door side to a unit-vector normal
+  const NORMALS = {
+    top: { x: 0, y: -1 },
+    bottom: { x: 0, y: 1 },
+    left: { x: -1, y: 0 },
+    right: { x: 1, y: 0 },
+  };
 
-  useEffect(() => {
-    const onKeyDown = (e) => {
-      // Copy
-      if (e.ctrlKey && e.key === "c" && selectedId) {
-        const unit = layout.units.find((u) => u.id === selectedId);
-        if (unit) {
-          setClipboard(unit);
-          console.log("Copied unit", unit.id);
-        }
-      }
-      // Paste
-      if (e.ctrlKey && e.key === "v" && clipboard) {
-        const newUnit = {
-          ...clipboard,
-          id: uuid(),
-          x: clipboard.x + 20,
-          y: clipboard.y + 20,
-        };
-        setLayout((prev) => ({
-          ...prev,
-          units: [...prev.units, newUnit],
-        }));
-        setSelectedId(newUnit.id);
-        console.log("Pasted unit", newUnit.id);
-      }
-    };
+  function segmentIntersectsRect(p1, p2, rect, margin = 1) {
+    const rx = rect.x + margin;
+    const ry = rect.y + margin;
+    const rw = rect.width - margin * 2;
+    const rh = rect.height - margin * 2;
+    const minX = rx,
+      maxX = rx + rw;
+    const minY = ry,
+      maxY = ry + rh;
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [clipboard, selectedId, layout.units]);
-  // re‑attach transformer whenever selection or layout changes
-  useEffect(() => {
-    if (trRef.current && selectedId) {
-      const stage = trRef.current.getStage();
-      const node = stage.findOne(`#${selectedId}`);
-      if (node) {
-        trRef.current.nodes([node]);
-        trRef.current.getLayer().batchDraw();
+    // trivial reject
+    if (
+      (p1.x < minX && p2.x < minX) ||
+      (p1.x > maxX && p2.x > maxX) ||
+      (p1.y < minY && p2.y < minY) ||
+      (p1.y > maxY && p2.y > maxY)
+    ) {
+      return false;
+    }
+
+    // helper to test two segments for intersection
+    function segIntersect(a, b, c, d) {
+      const orient = (p, q, r) =>
+        (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+      const o1 = orient(a, b, c),
+        o2 = orient(a, b, d);
+      const o3 = orient(c, d, a),
+        o4 = orient(c, d, b);
+
+      // collinearity + on-segment checks
+      if (
+        o1 === 0 &&
+        Math.min(a.x, b.x) <= c.x &&
+        c.x <= Math.max(a.x, b.x) &&
+        Math.min(a.y, b.y) <= c.y &&
+        c.y <= Math.max(a.y, b.y)
+      )
+        return true;
+      if (
+        o2 === 0 &&
+        Math.min(a.x, b.x) <= d.x &&
+        d.x <= Math.max(a.x, b.x) &&
+        Math.min(a.y, b.y) <= d.y &&
+        d.y <= Math.max(a.y, b.y)
+      )
+        return true;
+      if (
+        o3 === 0 &&
+        Math.min(c.x, d.x) <= a.x &&
+        a.x <= Math.max(c.x, d.x) &&
+        Math.min(c.y, d.y) <= a.y &&
+        a.y <= Math.max(c.y, d.y)
+      )
+        return true;
+      if (
+        o4 === 0 &&
+        Math.min(c.x, d.x) <= b.x &&
+        b.x <= Math.max(c.x, d.x) &&
+        Math.min(c.y, d.y) <= b.y &&
+        b.y <= Math.max(c.y, d.y)
+      )
+        return true;
+
+      return o1 > 0 !== o2 > 0 && o3 > 0 !== o4 > 0;
+    }
+
+    // check each of the four edges
+    const corners = [
+      { x: minX, y: minY },
+      { x: maxX, y: minY },
+      { x: maxX, y: maxY },
+      { x: minX, y: maxY },
+    ];
+    for (let i = 0; i < 4; i++) {
+      if (segIntersect(p1, p2, corners[i], corners[(i + 1) % 4])) {
+        return true;
       }
     }
-  }, [selectedId, layout]);
+    return false;
+  }
 
-  // compute all locked‐door global positions, then find all pairs ≤500px
+  const getTriangleCorners = (unit) => {
+    // local coords, right angle at:
+    // "nw": (0,0), legs to right and down
+    // "ne": (unit.width,0), legs to left and down
+    // "se": (unit.width, unit.height), legs to left and up
+    // "sw": (0, unit.height), legs to right and up
+    switch (unit.orientation) {
+      case "nw":
+        return [
+          { x: 0, y: 0 }, // right angle
+          { x: unit.width, y: 0 },
+          { x: 0, y: unit.height },
+        ];
+      case "ne":
+        return [
+          { x: unit.width, y: 0 }, // right angle
+          { x: 0, y: 0 },
+          { x: unit.width, y: unit.height },
+        ];
+      case "se":
+        return [
+          { x: unit.width, y: unit.height }, // right angle
+          { x: unit.width, y: 0 },
+          { x: 0, y: unit.height },
+        ];
+      case "sw":
+        return [
+          { x: 0, y: unit.height }, // right angle
+          { x: 0, y: 0 },
+          { x: unit.width, y: unit.height },
+        ];
+      default:
+        // fallback to full square triangle
+        return [
+          { x: 0, y: 0 },
+          { x: unit.width, y: 0 },
+          { x: 0, y: unit.height },
+        ];
+    }
+  };
+
+  const hasTriangleSide = (orientation, side) => {
+    const mapping = {
+      nw: ["top", "left", "hypotenuse"],
+      ne: ["top", "right", "hypotenuse"],
+      se: ["bottom", "right", "hypotenuse"],
+      sw: ["bottom", "left", "hypotenuse"],
+    };
+    return mapping[orientation]?.includes(side);
+  };
+
+  function getTraingleLockPos(unit) {}
+
+  function pointInRect(px, py, u) {
+    return (
+      px >= u.x && px <= u.x + u.width && py >= u.y && py <= u.y + u.height
+    );
+  }
+
+  function canTalk(lockA, lockB, units, params, cosHalfAngle) {
+    const dx = lockB.x - lockA.x;
+    const dy = lockB.y - lockA.y;
+    const distPx = Math.hypot(dx, dy);
+
+    const baseInConePx = params.baseInCone * PX_PER_FT;
+    const baseOutConePx = params.baseOutCone * PX_PER_FT;
+    const crossPenaltyPx = params.crossPenalty * PX_PER_FT;
+
+    // determine endpoint-containing units so we don't count them
+    const endpointIds = new Set();
+    for (const u of units) {
+      if (pointInRect(lockA.x, lockA.y, u)) endpointIds.add(u.id);
+      if (pointInRect(lockB.x, lockB.y, u)) endpointIds.add(u.id);
+    }
+
+    // count crossed units via segmentIntersectsRect (excluding endpoints)
+    let crosses = 0;
+    for (const u of units) {
+      if (
+        segmentIntersectsRect(
+          { x: lockA.x, y: lockA.y },
+          { x: lockB.x, y: lockB.y },
+          { x: u.x, y: u.y, width: u.width, height: u.height }
+        )
+      ) {
+        crosses++;
+      }
+    }
+    const penaltyPx = crosses * crossPenaltyPx;
+
+    // adjusted range from one lock toward the other
+    function adjRangePx(from, to) {
+      const n = NORMALS[from.side];
+      const vx = to.x - from.x;
+      const vy = to.y - from.y;
+      const dot = vx * n.x + vy * n.y;
+      const dist = Math.hypot(vx, vy);
+      const inFront = dot > 0 && dist > 0 && dot / dist >= cosHalfAngle;
+      const base = inFront ? baseInConePx : baseOutConePx;
+      return Math.max(0, base - penaltyPx);
+    }
+
+    return (
+      distPx <= adjRangePx(lockA, lockB) && distPx <= adjRangePx(lockB, lockA)
+    );
+  }
+
   function findNearbyLocks() {
-    // collect locks with true global positions
     const locks = [];
     layout.units.forEach((unit) => {
       (unit.doors || []).forEach((door) => {
         if (!door.locked) return;
 
-        const barLen = unit.width * 0.8,
-          barTh = 4;
+        const barLen = unit.width * 0.8;
+        const barTh = 4;
         let dx, dy, w, h;
         switch (door.side) {
           case "top":
@@ -252,6 +268,7 @@ export default function FacilityMap({
             dy = (unit.height - h) / 2;
             break;
         }
+
         const relX =
           door.side === "bottom"
             ? dx + w * 0.8
@@ -276,43 +293,95 @@ export default function FacilityMap({
     const pairsMap = {};
     if (limitNearest) {
       locks.forEach((src, i) => {
-        const neigh = locks
+        const neighbors = locks
           .map((dst, j) => {
             if (i === j) return null;
-            const dx = dst.x - src.x,
-              dy = dst.y - src.y;
-            const d = Math.hypot(dx, dy);
-            return canTalk(src, dst, layout.units) ? { j, d } : null;
+            const d = Math.hypot(dst.x - src.x, dst.y - src.y);
+            if (canTalk(src, dst, layout.units, params, cosHalfAngle)) {
+              return { j, dist: d };
+            }
+            return null;
           })
           .filter(Boolean)
-          .sort((a, b) => a.d - b.d)
+          .sort((a, b) => a.dist - b.dist)
           .slice(0, 3);
-
-        neigh.forEach(({ j, d }) => {
+        neighbors.forEach(({ j, dist }) => {
           const key = i < j ? `${i}-${j}` : `${j}-${i}`;
-          if (!pairsMap[key])
-            pairsMap[key] = {
-              p1: locks[i],
-              p2: locks[j],
-              dist: d,
-            };
-        });
-      });
-    } else {
-      // everyone‐who‐can talk logic
-      locks.forEach((A, i) => {
-        locks.forEach((B, j) => {
-          if (j > i && canTalk(A, B, layout.units)) {
-            const d = Math.hypot(B.x - A.x, B.y - A.y);
-            const key = `${i}-${j}`;
-            pairsMap[key] = { p1: A, p2: B, dist: d };
+          if (!pairsMap[key]) {
+            pairsMap[key] = { p1: locks[i], p2: locks[j], dist };
           }
         });
       });
+    } else {
+      for (let i = 0; i < locks.length; i++) {
+        for (let j = i + 1; j < locks.length; j++) {
+          if (canTalk(locks[i], locks[j], layout.units, params, cosHalfAngle)) {
+            const d = Math.hypot(
+              locks[j].x - locks[i].x,
+              locks[j].y - locks[i].y
+            );
+            const key = `${i}-${j}`;
+            pairsMap[key] = { p1: locks[i], p2: locks[j], dist: d };
+          }
+        }
+      }
     }
 
     setProximityPairs(Object.values(pairsMap));
   }
+
+  const gridSize = 25;
+  const snap = (v) => Math.round(v / gridSize) * gridSize;
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      // Copy
+      if (e.ctrlKey && e.key === "c" && selectedId) {
+        const unit = layout.units.find((u) => u.id === selectedId);
+        if (unit) {
+          setClipboard(unit);
+          console.log("Copied unit", unit.id);
+        }
+      }
+      // Paste
+      if (e.ctrlKey && e.key === "v" && clipboard) {
+        const newUnit = {
+          ...clipboard,
+          id: uuid(),
+          x: clipboard.x + 20,
+          y: clipboard.y + 20,
+        };
+        setLayout((prev) => ({
+          ...prev,
+          units: [...prev.units, newUnit],
+        }));
+        setSelectedId(newUnit.id);
+        console.log("Pasted unit", newUnit.id);
+      }
+      if (e.key === "Delete" && selectedId) {
+        setLayout((prev) => ({
+          ...prev,
+          units: prev.units.filter((u) => u.id !== selectedId),
+        }));
+        setSelectedId(null);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [clipboard, selectedId, layout.units]);
+  // re‑attach transformer whenever selection or layout changes
+  useEffect(() => {
+    if (trRef.current && selectedId) {
+      const stage = trRef.current.getStage();
+      const node = stage.findOne(`#${selectedId}`);
+      if (node) {
+        trRef.current.nodes([node]);
+        trRef.current.getLayer().batchDraw();
+      }
+    }
+  }, [selectedId, layout]);
+
+  // compute all locked‐door global positions, then find all pairs ≤500px
 
   return (
     <div className="relative w-full h-full">
@@ -330,7 +399,7 @@ export default function FacilityMap({
       </button>
       <button
         className="absolute top-20 right-2 z-20 bg-green-600 text-white px-3 py-1 rounded"
-        onClick={() => setProximityPairs([])}
+        onClick={() => setProximityPairs([]) & console.log(layout.units)}
       >
         Clear Distance Lines
       </button>
@@ -420,14 +489,31 @@ export default function FacilityMap({
                 }
               }}
             >
-              {/* Unit box */}
-              <Rect
-                width={unit.width}
-                height={unit.height}
-                fill={unit.color}
-                stroke="#333"
-                strokeWidth={1}
-              />
+              {unit.shape === "rightTriangle" ? (
+                <>
+                  {/* triangle body */}
+                  <Line
+                    points={getTriangleCorners(unit).flatMap((p) => [p.x, p.y])}
+                    closed
+                    fill={unit.color}
+                    stroke="#333"
+                    strokeWidth={1}
+                  />
+                </>
+              ) : (
+                <>
+                  {/* rectangle body */}
+                  <Rect
+                    width={unit.width}
+                    height={unit.height}
+                    fill={unit.color}
+                    stroke="#333"
+                    strokeWidth={1}
+                  />
+                </>
+              )}
+
+              {/* label (works for both) */}
               <Text
                 text={unit.label}
                 fontSize={14}
@@ -440,38 +526,184 @@ export default function FacilityMap({
 
               {/* Doors & lock circles */}
               {(unit.doors || []).map((door, i) => {
-                const barLen = unit.width * 0.8;
                 const barTh = 4;
-                let x, y, w, h;
-                switch (door.side) {
-                  case "top":
-                    w = barLen;
-                    h = barTh;
-                    x = (unit.width - w) / 2;
-                    y = -h / 2;
-                    break;
-                  case "bottom":
-                    w = barLen;
-                    h = barTh;
-                    x = (unit.width - w) / 2;
-                    y = unit.height - h / 2;
-                    break;
-                  case "left":
-                    w = barTh;
-                    h = unit.height * 0.8;
-                    x = -w / 2;
-                    y = (unit.height - h) / 2;
-                    break;
-                  case "right":
-                    w = barTh;
-                    h = unit.height * 0.8;
-                    x = unit.width - w / 2;
-                    y = (unit.height - h) / 2;
-                    break;
-                }
+                let doorBar = null;
+                let lockPos = null;
 
-                return (
-                  <React.Fragment key={i}>
+                if (unit.shape === "rightTriangle") {
+                  // triangle-specific logic
+                  const orient = unit.orientation || "nw";
+                  if (!hasTriangleSide(orient, door.side)) {
+                    return null; // invalid side for this triangle
+                  }
+
+                  // compute bar for leg sides (top/bottom/left/right)
+                  if (door.side === "top") {
+                    const barLen = unit.width * 0.8;
+                    const x = (unit.width - barLen) / 2;
+                    const y = -barTh / 2;
+                    doorBar = (
+                      <Rect
+                        x={x}
+                        y={y}
+                        width={barLen}
+                        height={barTh}
+                        fill="#555"
+                        cornerRadius={2}
+                      />
+                    );
+                    lockPos = {
+                      x: x + barLen * 0.2,
+                      y: y + 2,
+                    };
+                  } else if (door.side === "bottom") {
+                    const barLen = unit.width * 0.8;
+                    const x = (unit.width - barLen) / 2;
+                    const y = unit.height - barTh / 2;
+                    doorBar = (
+                      <Rect
+                        x={x}
+                        y={y}
+                        width={barLen}
+                        height={barTh}
+                        fill="#555"
+                        cornerRadius={2}
+                      />
+                    );
+                    lockPos = {
+                      x: x + barLen * 0.8,
+                      y: y + 2,
+                    };
+                  } else if (door.side === "left") {
+                    const barLen = unit.height * 0.8;
+                    const x = -barTh / 2;
+                    const y = (unit.height - barLen) / 2;
+                    doorBar = (
+                      <Rect
+                        x={x}
+                        y={y}
+                        width={barTh}
+                        height={barLen}
+                        fill="#555"
+                        cornerRadius={2}
+                      />
+                    );
+                    lockPos = {
+                      x: x + 2,
+                      y: y + barLen * 0.8,
+                    };
+                  } else if (door.side === "right") {
+                    const barLen = unit.height * 0.8;
+                    const x = unit.width - barTh / 2;
+                    const y = (unit.height - barLen) / 2;
+                    doorBar = (
+                      <Rect
+                        x={x}
+                        y={y}
+                        width={barTh}
+                        height={barLen}
+                        fill="#555"
+                        cornerRadius={2}
+                      />
+                    );
+                    lockPos = {
+                      x: x + 2,
+                      y: y + barLen * 0.2,
+                    };
+                  } else if (door.side === "hypotenuse") {
+                    // corners: [rightAngleCorner, other1, other2]
+                    const corners = getTriangleCorners(unit);
+                    const p1 = corners[1];
+                    const p2 = corners[2];
+
+                    // bar center/orientation
+                    const midX = (p1.x + p2.x) / 2;
+                    const midY = (p1.y + p2.y) / 2;
+                    const deltaX = p2.x - p1.x;
+                    const deltaY = p2.y - p1.y;
+                    const fullLen = Math.hypot(deltaX, deltaY);
+                    const length = fullLen * 0.8; // your original scaling
+                    const angleDeg =
+                      (Math.atan2(deltaY, deltaX) * 180) / Math.PI;
+
+                    doorBar = (
+                      <Rect
+                        x={midX}
+                        y={midY}
+                        width={length}
+                        height={barTh}
+                        offsetX={length / 2}
+                        offsetY={barTh / 2}
+                        rotation={angleDeg}
+                        fill="#555"
+                        cornerRadius={2}
+                      />
+                    );
+                    switch (unit.orientation) {
+                      case "nw":
+                        lockPos = {
+                          x: unit.width - unit.width / 4.2,
+                          y: unit.height / 4.2,
+                        };
+                        break;
+                      case "ne":
+                        lockPos = {
+                          x: unit.width - unit.width / 4.2,
+                          y: unit.height - unit.height / 4.2,
+                        };
+                        break;
+                      case "sw":
+                        lockPos = {
+                          x: unit.width / 4.2,
+                          y: unit.height / 4.2,
+                        };
+                        break;
+                      case "se":
+                        lockPos = {
+                          x: unit.width / 4.2,
+                          y: unit.height - unit.height / 4.2,
+                        };
+                        break;
+                      default:
+                        lockPos = {
+                          x: unit.width - unit.width / 4.2,
+                          y: unit.height / 4.2,
+                        };
+                        break;
+                    }
+                  }
+                } else {
+                  // rectangle fallback (existing logic)
+                  const barLen = unit.width * 0.8;
+                  let x, y, w, h;
+                  switch (door.side) {
+                    case "top":
+                      w = barLen;
+                      h = barTh;
+                      x = (unit.width - w) / 2;
+                      y = -h / 2;
+                      break;
+                    case "bottom":
+                      w = barLen;
+                      h = barTh;
+                      x = (unit.width - w) / 2;
+                      y = unit.height - h / 2;
+                      break;
+                    case "left":
+                      w = barTh;
+                      h = unit.height * 0.8;
+                      x = -w / 2;
+                      y = (unit.height - h) / 2;
+                      break;
+                    case "right":
+                      w = barTh;
+                      h = unit.height * 0.8;
+                      x = unit.width - w / 2;
+                      y = (unit.height - h) / 2;
+                      break;
+                  }
+
+                  doorBar = (
                     <Rect
                       x={x}
                       y={y}
@@ -480,22 +712,31 @@ export default function FacilityMap({
                       fill="#555"
                       cornerRadius={2}
                     />
-                    {door.locked && (
+                  );
+
+                  lockPos = {
+                    x:
+                      door.side === "bottom"
+                        ? x + w * 0.8
+                        : door.side === "top"
+                        ? x + w * 0.2
+                        : x + 2,
+                    y:
+                      door.side === "left"
+                        ? y + h * 0.8
+                        : door.side === "right"
+                        ? y + h * 0.2
+                        : y + 2,
+                  };
+                }
+
+                return (
+                  <React.Fragment key={i}>
+                    {doorBar}
+                    {door.locked && lockPos && (
                       <Circle
-                        x={
-                          door.side === "bottom"
-                            ? x + w * 0.8
-                            : door.side === "top"
-                            ? x + w * 0.2
-                            : x + 2
-                        }
-                        y={
-                          door.side === "left"
-                            ? y + h * 0.8
-                            : door.side === "right"
-                            ? y + h * 0.2
-                            : y + 2
-                        }
+                        x={lockPos.x}
+                        y={lockPos.y}
                         radius={6}
                         fill="blue"
                         listening={true}
