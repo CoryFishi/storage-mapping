@@ -1,4 +1,3 @@
-import { v4 as uuid } from "uuid";
 import layoutUnits from "../utils/facility1.json";
 import { useMemo, useState } from "react";
 import CreateUnitModal from "./CreateUnitModal";
@@ -10,35 +9,6 @@ export default function Sidebar({
   params,
 }) {
   const [isCreateUnitModalOpen, setIsCreateUnitModalOpen] = useState(false);
-  const makeLabel = () => `Unit ${layout.units.length}`;
-
-  const addUnit = ({
-    width = 50,
-    height = 50,
-    type = "Square",
-    shape = "square",
-    orientation = "nw",
-    wallMultiplier = 1,
-  }) => {
-    const newUnit = {
-      id: uuid(),
-      label: makeLabel(),
-      type,
-      shape,
-      orientation,
-      wallMultiplier,
-      x: 0,
-      y: 0,
-      width,
-      height,
-      color: "#e5e7eb",
-      doors: [],
-    };
-    setLayout((prev) => ({
-      ...prev,
-      units: [...prev.units, newUnit],
-    }));
-  };
 
   const PX_PER_FT = 5;
 
@@ -68,28 +38,6 @@ export default function Sidebar({
       totalLocks,
     };
   }, [layout.units]);
-
-  const addRightTriangle = (orient) => {
-    const valid = ["nw", "ne", "se", "sw"].includes(orient) ? orient : "nw";
-    addUnit({
-      width: 50,
-      height: 50,
-      type: "RightTriangle",
-      shape: "rightTriangle",
-      orientation: valid,
-      wallMultiplier: 1,
-    });
-  };
-
-  const addThickSquare = () => {
-    addUnit({
-      width: 50,
-      height: 50,
-      type: "Square",
-      shape: "square",
-      wallMultiplier: 2,
-    });
-  };
 
   const loadLayout1 = () => {
     setLayout((prev) => ({

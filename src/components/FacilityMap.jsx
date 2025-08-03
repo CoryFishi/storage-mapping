@@ -37,6 +37,11 @@ export default function FacilityMap({
   const stageRef = useRef();
   const [clipboard, setClipboard] = useState(null);
   const [limitNearest, setLimitNearest] = useState(true);
+  const [reachability, setReachability] = useState({
+    visited: new Set(),
+    predecessor: {},
+  });
+  const [rootLockIndex, setRootLockIndex] = useState(null);
   // Map door side to a unit-vector normal
   const NORMALS = {
     top: { x: 0, y: -1 },
@@ -51,6 +56,132 @@ export default function FacilityMap({
     se: { x: -1 / Math.SQRT2, y: -1 / Math.SQRT2 },
     sw: { x: 1 / Math.SQRT2, y: -1 / Math.SQRT2 },
   };
+  function getAllLocks() {
+    const locks = [];
+    layout.units.forEach((unit) => {
+      (unit.doors || []).forEach((door) => {
+        if (!door.locked) return;
+
+        let lockPos;
+        if (unit.shape === "rightTriangle") {
+          lockPos = getTriangleLockPos(unit, door);
+        } else {
+          const barLen = unit.width * 0.8;
+          const barTh = 4;
+          let dx, dy, w, h;
+          switch (door.side) {
+            case "top":
+              w = barLen;
+              h = barTh;
+              dx = (unit.width - w) / 2;
+              dy = -h / 2;
+              break;
+            case "bottom":
+              w = barLen;
+              h = barTh;
+              dx = (unit.width - w) / 2;
+              dy = unit.height - h / 2;
+              break;
+            case "left":
+              w = barTh;
+              h = unit.height * 0.8;
+              dx = -w / 2;
+              dy = (unit.height - h) / 2;
+              break;
+            case "right":
+              w = barTh;
+              h = unit.height * 0.8;
+              dx = unit.width - w / 2;
+              dy = (unit.height - h) / 2;
+              break;
+          }
+
+          lockPos = {
+            x:
+              door.side === "bottom"
+                ? dx + w * 0.8
+                : door.side === "top"
+                ? dx + w * 0.2
+                : dx + 2,
+            y:
+              door.side === "left"
+                ? dy + h * 0.8
+                : door.side === "right"
+                ? dy + h * 0.2
+                : dy + 2,
+          };
+        }
+
+        if (!lockPos) return;
+
+        locks.push({
+          x: unit.x + lockPos.x,
+          y: unit.y + lockPos.y,
+          side: door.side,
+          orientation:
+            unit.shape === "rightTriangle"
+              ? unit.orientation || "nw"
+              : undefined,
+          unitId: unit.id,
+        });
+      });
+    });
+    return locks;
+  }
+  function buildAdjacency(locks) {
+    const adj = locks.map(() => []);
+    for (let i = 0; i < locks.length; i++) {
+      for (let j = 0; j < locks.length; j++) {
+        if (i === j) continue;
+        if (canTalk(locks[i], locks[j], layout.units, params, cosHalfAngle)) {
+          adj[i].push(j);
+        }
+      }
+    }
+    return adj;
+  }
+
+  function traverseFromRoot(rootIndex, adjacency) {
+    const visited = new Set([rootIndex]);
+    const predecessor = {};
+    const queue = [rootIndex];
+    while (queue.length) {
+      const u = queue.shift();
+      for (const v of adjacency[u]) {
+        if (!visited.has(v)) {
+          visited.add(v);
+          predecessor[v] = u;
+          queue.push(v);
+        }
+      }
+    }
+    return { visited, predecessor };
+  }
+
+  // reconstruct path (array of indices) from target back to root
+  function getPathToRoot(targetIndex, rootIndex, predecessor) {
+    if (targetIndex === rootIndex) return [rootIndex];
+    if (!(targetIndex in predecessor)) return null;
+    const path = [];
+    let cur = targetIndex;
+    while (cur !== undefined) {
+      path.push(cur);
+      if (cur === rootIndex) break;
+      cur = predecessor[cur];
+    }
+    return path.reverse();
+  }
+  function computeReachability(rootIndex) {
+    const locks = getAllLocks();
+    if (rootIndex == null || rootIndex < 0 || rootIndex >= locks.length) return;
+    const adjacency = buildAdjacency(locks);
+    const { visited, predecessor } = traverseFromRoot(rootIndex, adjacency);
+    setReachability({ visited, predecessor });
+    setRootLockIndex(rootIndex);
+    // Optionally store the locks array if you want to reference it elsewhere
+    return locks;
+  }
+
   function segmentIntersectsRect(p1, p2, rect, margin = 1) {
     const rx = rect.x + margin;
     const ry = rect.y + margin;
@@ -126,64 +257,6 @@ export default function FacilityMap({
     ];
     for (let i = 0; i < 4; i++) {
       if (segIntersect(p1, p2, corners[i], corners[(i + 1) % 4])) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  function segmentIntersectsTriangle(p1, p2, unit) {
-    const corners = getTriangleCorners(unit).map((c) => ({
-      x: unit.x + c.x,
-      y: unit.y + c.y,
-    }));
-
-    function segIntersect(a, b, c, d) {
-      const orient = (p, q, r) =>
-        (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
-      const o1 = orient(a, b, c),
-        o2 = orient(a, b, d);
-      const o3 = orient(c, d, a),
-        o4 = orient(c, d, b);
-
-      if (
-        o1 === 0 &&
-        Math.min(a.x, b.x) <= c.x &&
-        c.x <= Math.max(a.x, b.x) &&
-        Math.min(a.y, b.y) <= c.y &&
-        c.y <= Math.max(a.y, b.y)
-      )
-        return true;
-      if (
-        o2 === 0 &&
-        Math.min(a.x, b.x) <= d.x &&
-        d.x <= Math.max(a.x, b.x) &&
-        Math.min(a.y, b.y) <= d.y &&
-        d.y <= Math.max(a.y, b.y)
-      )
-        return true;
-      if (
-        o3 === 0 &&
-        Math.min(c.x, d.x) <= a.x &&
-        a.x <= Math.max(c.x, d.x) &&
-        Math.min(c.y, d.y) <= a.y &&
-        a.y <= Math.max(c.y, d.y)
-      )
-        return true;
-      if (
-        o4 === 0 &&
-        Math.min(c.x, d.x) <= b.x &&
-        b.x <= Math.max(c.x, d.x) &&
-        Math.min(c.y, d.y) <= b.y &&
-        b.y <= Math.max(c.y, d.y)
-      )
-        return true;
-
-      return o1 > 0 !== o2 > 0 && o3 > 0 !== o4 > 0;
-    }
-
-    for (let i = 0; i < 3; i++) {
-      if (segIntersect(p1, p2, corners[i], corners[(i + 1) % 3])) {
         return true;
       }
     }
@@ -286,7 +359,6 @@ export default function FacilityMap({
         ];
     }
   };
-
   const hasTriangleSide = (orientation, side) => {
     const mapping = {
       nw: ["top", "left", "hypotenuse"],
@@ -343,7 +415,6 @@ export default function FacilityMap({
 
     return null;
   }
-
   function pointInRect(px, py, u) {
     return (
       px >= u.x && px <= u.x + u.width && py >= u.y && py <= u.y + u.height
@@ -360,7 +431,6 @@ export default function FacilityMap({
     const t = ((a.y - b.y) * (px - a.x) + (b.x - a.x) * (py - a.y)) / area;
     return s >= 0 && t >= 0 && s + t <= 1;
   }
-
   function canTalk(lockA, lockB, units, params, cosHalfAngle) {
     const dx = lockB.x - lockA.x;
     const dy = lockB.y - lockA.y;
@@ -409,7 +479,6 @@ export default function FacilityMap({
       distPx <= adjRangePx(lockA, lockB) && distPx <= adjRangePx(lockB, lockA)
     );
   }
-
   function countCrossedUnits(lockA, lockB, units, endpointIds) {
     const crossed = new Set();
     const p1 = { x: lockA.x, y: lockA.y };
@@ -436,6 +505,25 @@ export default function FacilityMap({
     }
 
     return crossed.size;
+  }
+  function getEndpointIds(lockA, lockB, units) {
+    const endpointIds = new Set();
+    for (const u of units) {
+      const containsA =
+        u.shape === "rightTriangle"
+          ? pointInTriangle(lockA.x, lockA.y, u)
+          : pointInRect(lockA.x, lockA.y, u);
+      const containsB =
+        u.shape === "rightTriangle"
+          ? pointInTriangle(lockB.x, lockB.y, u)
+          : pointInRect(lockB.x, lockB.y, u);
+      if (containsA || containsB) endpointIds.add(u.id);
+    }
+    return endpointIds;
+  }
+
+  function clamp01(x) {
+    return Math.max(0, Math.min(1, x));
   }
 
   function findNearbyLocks() {
@@ -515,32 +603,94 @@ export default function FacilityMap({
           .map((dst, j) => {
             if (i === j) return null;
             const d = Math.hypot(dst.x - src.x, dst.y - src.y);
-            if (canTalk(src, dst, layout.units, params, cosHalfAngle)) {
-              return { j, dist: d };
-            }
-            return null;
+            if (!canTalk(src, dst, layout.units, params, cosHalfAngle))
+              return null;
+
+            // compute crossings with proper endpoint exclusion
+            const endpointIds = getEndpointIds(src, dst, layout.units);
+            const crosses = countCrossedUnits(
+              src,
+              dst,
+              layout.units,
+              endpointIds
+            );
+
+            const baseInConePx = params.baseInCone * PX_PER_FT;
+            const crossPenaltyPx = params.crossPenalty * PX_PER_FT;
+
+            // distance score: closer is better
+            const distScore = 1 - clamp01(d / baseInConePx);
+            // obstruction score: fewer crossings is better
+            const obsScore =
+              1 - clamp01((crosses * crossPenaltyPx) / baseInConePx);
+            const quality = Math.min(distScore, obsScore); // conservative
+
+            let color;
+            if (quality > 0.75) color = "green";
+            else if (quality > 0.4) color = "orange";
+            else color = "red";
+
+            return { j, dist: d, crosses, quality, color };
           })
           .filter(Boolean)
           .sort((a, b) => a.dist - b.dist)
           .slice(0, 3);
-        neighbors.forEach(({ j, dist }) => {
+
+        neighbors.forEach(({ j, dist, crosses, quality, color }) => {
           const key = i < j ? `${i}-${j}` : `${j}-${i}`;
           if (!pairsMap[key]) {
-            pairsMap[key] = { p1: locks[i], p2: locks[j], dist };
+            pairsMap[key] = {
+              p1: locks[i],
+              p2: locks[j],
+              dist,
+              crosses,
+              quality,
+              color,
+              i,
+              j,
+            };
           }
         });
       });
     } else {
       for (let i = 0; i < locks.length; i++) {
         for (let j = i + 1; j < locks.length; j++) {
-          if (canTalk(locks[i], locks[j], layout.units, params, cosHalfAngle)) {
-            const d = Math.hypot(
-              locks[j].x - locks[i].x,
-              locks[j].y - locks[i].y
-            );
-            const key = `${i}-${j}`;
-            pairsMap[key] = { p1: locks[i], p2: locks[j], dist: d };
-          }
+          if (!canTalk(locks[i], locks[j], layout.units, params, cosHalfAngle))
+            continue;
+          const d = Math.hypot(
+            locks[j].x - locks[i].x,
+            locks[j].y - locks[i].y
+          );
+
+          const endpointIds = getEndpointIds(locks[i], locks[j], layout.units);
+          const crosses = countCrossedUnits(
+            locks[i],
+            locks[j],
+            layout.units,
+            endpointIds
+          );
+          const baseInConePx = params.baseInCone * PX_PER_FT;
+          const crossPenaltyPx = params.crossPenalty * PX_PER_FT;
+          const distScore = 1 - clamp01(d / baseInConePx);
+          const obsScore =
+            1 - clamp01((crosses * crossPenaltyPx) / baseInConePx);
+          const quality = Math.min(distScore, obsScore);
+          let color;
+          if (quality > 0.75) color = "green";
+          else if (quality > 0.4) color = "orange";
+          else color = "red";
+
+          const key = `${i}-${j}`;
+          pairsMap[key] = {
+            p1: locks[i],
+            p2: locks[j],
+            dist: d,
+            crosses,
+            quality,
+            color,
+            i,
+            j,
+          };
         }
       }
     }
@@ -549,7 +699,9 @@ export default function FacilityMap({
   }
 
   const gridSize = 25;
+
   const snap = (v) => Math.round(v / gridSize) * gridSize;
+
   useEffect(() => {
     const onKeyDown = (e) => {
       // Copy
@@ -598,9 +750,6 @@ export default function FacilityMap({
       }
     }
   }, [selectedId, layout]);
-
-  // compute all locked‐door global positions, then find all pairs ≤500px
-
   return (
     <div className="relative w-full h-full">
       <button
@@ -627,6 +776,18 @@ export default function FacilityMap({
       >
         Limit to 3 nearest: {limitNearest ? "On" : "Off"}
       </button>
+      <button
+        className="absolute top-38 right-2 z-20 bg-purple-600 text-white px-3 py-1 rounded"
+        onClick={() => {
+          const locks = getAllLocks();
+          if (locks.length === 0) return;
+          // for demo, pick lock 0 as root
+          computeReachability(50);
+        }}
+      >
+        Compute Reachability from First Lock
+      </button>
+
       <Stage
         width={layout.canvasSize.width}
         height={layout.canvasSize.height}
@@ -935,32 +1096,62 @@ export default function FacilityMap({
                 "bottom-right",
               ]}
               onTransformEnd={() => {
-                const node = trRef.current.nodes()[0];
-                const scaleX = node.scaleX(),
-                  scaleY = node.scaleY();
+                const node = trRef.current?.nodes()[0];
+                if (!node || !selectedId) return;
+
+                // find the source unit so we can fallback if group width/height is zero
+                const unit = layout.units.find((u) => u.id === selectedId);
+                if (!unit) return;
+
+                const scaleX = node.scaleX();
+                const scaleY = node.scaleY();
+
+                // if effectively no resize, just snap position
+                const eps = 0.01;
+                if (Math.abs(scaleX - 1) < eps && Math.abs(scaleY - 1) < eps) {
+                  const newX = snap(node.x());
+                  const newY = snap(node.y());
+                  node.x(newX);
+                  node.y(newY);
+                  return;
+                }
+
+                // base dimensions: prefer what's on the node, else fallback to the unit data
+                const baseWidth = node.width() || unit.width;
+                const baseHeight = node.height() || unit.height;
+
+                const rawWidth = baseWidth * scaleX;
+                const rawHeight = baseHeight * scaleY;
+
                 const newW = Math.max(
                   gridSize,
-                  Math.round((node.width() * scaleX) / gridSize) * gridSize
+                  Math.round(rawWidth / gridSize) * gridSize
                 );
                 const newH = Math.max(
                   gridSize,
-                  Math.round((node.height() * scaleY) / gridSize) * gridSize
+                  Math.round(rawHeight / gridSize) * gridSize
                 );
-                node.width(newW);
-                node.height(newH);
+
+                // apply normalized size and clear scale
                 node.scaleX(1);
                 node.scaleY(1);
-                const newX = snap(node.x()),
-                  newY = snap(node.y());
+                node.width(newW);
+                node.height(newH);
+
+                // snap position
+                const newX = snap(node.x());
+                const newY = snap(node.y());
                 node.x(newX);
                 node.y(newY);
+
                 onUpdate("resizeUnit", selectedId, {
                   x: newX,
                   y: newY,
                   width: newW,
                   height: newH,
                 });
-                trRef.current.getLayer().batchDraw();
+
+                trRef.current.getLayer()?.batchDraw();
               }}
             />
           )}
@@ -972,15 +1163,17 @@ export default function FacilityMap({
               <React.Fragment key={idx}>
                 <Line
                   points={[pair.p1.x, pair.p1.y, pair.p2.x, pair.p2.y]}
-                  stroke="red"
+                  stroke={pair.color || "red"}
                   strokeWidth={2}
                   dash={[4, 4]}
                 />
                 {proximityText && (
                   <Text
-                    text={`${Math.round(pair.dist) / 5} ft`}
+                    text={`${Math.round(pair.dist / PX_PER_FT)} ft \n ${
+                      pair.quality.toFixed(2) * 100
+                    }%`}
                     fontSize={14}
-                    fill="black"
+                    fill={"black"}
                     x={(pair.p1.x + pair.p2.x) / 2 + 5}
                     y={(pair.p1.y + pair.p2.y) / 2 - 10}
                     listening={false}
@@ -990,6 +1183,73 @@ export default function FacilityMap({
             ))}
           </Layer>
         )}
+        {/* Reachability visualization */}
+        {rootLockIndex != null && (
+          <Layer>
+            {(() => {
+              const locks = getAllLocks();
+              const { visited, predecessor } = reachability;
+
+              // draw tree edges (green) from predecessor
+              const treeLines = Object.entries(predecessor).map(
+                ([childStr, parent]) => {
+                  const child = parseInt(childStr, 10);
+                  const p1 = locks[parent];
+                  const p2 = locks[child];
+                  if (!p1 || !p2) return null;
+                  return (
+                    <Line
+                      key={`tree-${parent}-${child}`}
+                      points={[p1.x, p1.y, p2.x, p2.y]}
+                      stroke="green"
+                      strokeWidth={2}
+                    />
+                  );
+                }
+              );
+
+              // highlight unreachable locks with red circle
+              const unreachableCircles = locks
+                .map((lock, idx) => ({ lock, idx }))
+                .filter(({ idx }) => !visited.has(idx))
+                .map(({ lock, idx }) => (
+                  <Circle
+                    key={`unreach-${idx}`}
+                    x={lock.x}
+                    y={lock.y}
+                    radius={10}
+                    stroke="red"
+                    strokeWidth={2}
+                  />
+                ));
+
+              // mark root lock
+              const rootMark = (() => {
+                const root = locks[rootLockIndex];
+                if (!root) return null;
+                return (
+                  <Circle
+                    key="root-lock"
+                    x={root.x}
+                    y={root.y}
+                    radius={10}
+                    stroke="blue"
+                    strokeWidth={3}
+                  />
+                );
+              })();
+
+              return (
+                <>
+                  {treeLines}
+                  {unreachableCircles}
+                  {rootMark}
+                </>
+              );
+            })()}
+          </Layer>
+        )}
+
         {tooltip.visible && (
           <Layer>
             <Label x={tooltip.x} y={tooltip.y} listening={false}>
