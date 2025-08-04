@@ -13,6 +13,7 @@ import {
 } from "react-konva";
 import { v4 as uuid } from "uuid";
 import EditAccessPointModal from "./EditAccessPointModal";
+import EditWallModal from "./EditWallModal";
 
 const PX_PER_FT = 5;
 
@@ -35,6 +36,9 @@ export default function FacilityMap({
   pointInTriangle,
   countCrossedUnits,
   clamp01,
+  canLockTalkToAP,
+  cosHalfAngle,
+  calculateWallThickness,
 }) {
   const [selectedId, setSelectedId] = useState(null);
   const [tooltip, setTooltip] = useState({
@@ -49,6 +53,8 @@ export default function FacilityMap({
   const [isEditAccessPointModalOpen, setIsEditAccessPointModalOpen] =
     useState(false);
   const [editAccessPoint, setEditAccessPoint] = useState(null);
+  const [isEditWallModalOpen, setIsEditWallModalOpen] = useState(false);
+  const [editWall, setEditWall] = useState(null);
 
   const gridSize = 25;
 
@@ -59,23 +65,36 @@ export default function FacilityMap({
       // Copy
       if (e.ctrlKey && e.key === "c" && selectedId) {
         const unit = layout.units.find((u) => u.id === selectedId);
+        const wall = layout.walls.find((w) => w.id === selectedId);
         if (unit) {
           setClipboard(unit);
           console.log("Copied unit", unit.id);
+        } else if (wall) {
+          setClipboard(wall);
+          console.log("Copied wall", wall.id);
         }
       }
       // Paste
       if (e.ctrlKey && e.key === "v" && clipboard) {
-        const newUnit = {
-          ...clipboard,
-          id: uuid(),
-          x: clipboard.x + 20,
-          y: clipboard.y + 20,
-        };
-        setLayout((prev) => ({
-          ...prev,
-          units: [...prev.units, newUnit],
-        }));
+        let newUnit = { ...clipboard };
+        if (clipboard.shape) {
+          newUnit.id = uuid();
+          newUnit.x += 20;
+          newUnit.y += 20;
+          setLayout((prev) => ({
+            ...prev,
+            units: [...prev.units, newUnit],
+          }));
+        } else {
+          newUnit.id = uuid();
+          newUnit.x1 += 20;
+          newUnit.x2 += 20;
+          newUnit.y2 += 20;
+          setLayout((prev) => ({
+            ...prev,
+            walls: [...prev.walls, newUnit],
+          }));
+        }
         setSelectedId(newUnit.id);
         console.log("Pasted unit", newUnit.id);
       }
@@ -114,6 +133,18 @@ export default function FacilityMap({
               accessPoints: prev.accessPoints.map((u) =>
                 u.id === updated.id ? updated : u
               ),
+            }));
+          }}
+        />
+      )}
+      {isEditWallModalOpen && (
+        <EditWallModal
+          wall={editWall}
+          setIsEditWallModalOpen={setIsEditWallModalOpen}
+          onSave={(updated) => {
+            setLayout((prev) => ({
+              ...prev,
+              walls: prev.walls.map((u) => (u.id === updated.id ? updated : u)),
             }));
           }}
         />
@@ -188,7 +219,7 @@ export default function FacilityMap({
                   text: `${unit.label} — ${unit.width / 5}×${unit.height / 5}`,
                 });
                 if (stageRef.current) {
-                  stageRef.current.container().style.cursor = "pointer";
+                  stageRef.current.container().style.cursor = "grab";
                 }
               }}
               onMouseLeave={() => {
@@ -486,6 +517,118 @@ export default function FacilityMap({
             />
           )}
         </Layer>
+        <Layer>
+          {layout.walls?.map((wall) => {
+            // Helper for drag logic
+            const handleDragEnd = (wallId, end, e) => {
+              const newX = snap(e.target.x());
+              const newY = snap(e.target.y());
+              setLayout((prev) => ({
+                ...prev,
+                walls: prev.walls.map((w) =>
+                  w.id === wallId
+                    ? end === "start"
+                      ? { ...w, x1: newX, y1: newY }
+                      : { ...w, x2: newX, y2: newY }
+                    : w
+                ),
+              }));
+            };
+
+            return (
+              <React.Fragment key={`wall-${wall.id}`}>
+                <Line
+                  points={[wall.x1, wall.y1, wall.x2, wall.y2]}
+                  stroke={wall.color || "#333"}
+                  strokeWidth={wall.thickness || 2}
+                  onClick={() => setSelectedId(wall.id)}
+                  onDblClick={() => {
+                    setEditWall(wall);
+                    setIsEditWallModalOpen(true);
+                  }}
+                  draggable
+                  x={0}
+                  y={0}
+                  onMouseEnter={() => {
+                    if (stageRef.current) {
+                      stageRef.current.container().style.cursor = "grab";
+                    }
+                  }}
+                  onMouseLeave={() => {
+                    if (stageRef.current) {
+                      stageRef.current.container().style.cursor = "default";
+                    }
+                  }}
+                  onDragEnd={(e) => {
+                    const dx = snap(e.target.x());
+                    const dy = snap(e.target.y());
+                    setLayout((prev) => ({
+                      ...prev,
+                      walls: prev.walls.map((w) =>
+                        w.id === wall.id
+                          ? {
+                              ...w,
+                              x1: w.x1 + dx,
+                              y1: w.y1 + dy,
+                              x2: w.x2 + dx,
+                              y2: w.y2 + dy,
+                            }
+                          : w
+                      ),
+                    }));
+                    e.target.x(0);
+                    e.target.y(0);
+                  }}
+                />
+                {/* Drag handles for endpoints */}
+                {selectedId === wall.id && (
+                  <>
+                    <Circle
+                      x={wall.x1}
+                      y={wall.y1}
+                      radius={8}
+                      fill={wall.color || "#22c55e"}
+                      stroke="#000"
+                      strokeWidth={1}
+                      draggable
+                      onDragEnd={(e) => handleDragEnd(wall.id, "start", e)}
+                      onMouseEnter={() => {
+                        if (stageRef.current) {
+                          stageRef.current.container().style.cursor = "grab";
+                        }
+                      }}
+                      onMouseLeave={() => {
+                        if (stageRef.current) {
+                          stageRef.current.container().style.cursor = "default";
+                        }
+                      }}
+                    />
+                    <Circle
+                      x={wall.x2}
+                      y={wall.y2}
+                      radius={8}
+                      fill={wall.color || "#22c55e"}
+                      stroke="#000"
+                      strokeWidth={1}
+                      draggable
+                      onDragEnd={(e) => handleDragEnd(wall.id, "end", e)}
+                      onMouseEnter={() => {
+                        if (stageRef.current) {
+                          stageRef.current.container().style.cursor = "grab";
+                        }
+                      }}
+                      onMouseLeave={() => {
+                        if (stageRef.current) {
+                          stageRef.current.container().style.cursor = "default";
+                        }
+                      }}
+                    />
+                  </>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </Layer>
         {/* Proximity overlay */}
         {proximityPairs.length > 0 && (
           <Layer>
@@ -676,10 +819,10 @@ export default function FacilityMap({
                 onDblClick={(e) => {
                   e.cancelBubble = true;
                   setIsEditAccessPointModalOpen(true);
-                  setEditAccessPoint(ap);
                   console.log(ap);
                 }}
                 onClick={(e) => {
+                  setEditAccessPoint(ap);
                   setLayout((prev) => ({
                     ...prev,
                     accessPoints: (prev.accessPoints || []).map((p) =>
@@ -703,9 +846,14 @@ export default function FacilityMap({
             const links = allLocks
               .map((lock) => {
                 const dist = Math.hypot(lock.x - ap.x, lock.y - ap.y); // pixel distance
-                if (dist > ap.range) return null;
 
-                // endpoint: lock is inside some unit(s); AP is not a unit so only exclude the lock's containing unit(s)
+                // Use the proper canLockTalkToAP function that includes cone logic and wall penalties
+                if (
+                  !canLockTalkToAP(lock, ap, layout.units, params, cosHalfAngle)
+                ) {
+                  return null;
+                }
+
                 const endpointIds = new Set();
                 for (const u of layout.units) {
                   const containsLock =
@@ -718,17 +866,24 @@ export default function FacilityMap({
                 // count crossed units between lock and AP
                 const crosses = countCrossedUnits(
                   lock,
-                  { x: ap.x, y: ap.y, side: null, orientation: undefined },
+                  { x: ap.x, y: ap.y },
                   layout.units,
                   endpointIds
                 );
-
+                const wallCrosses = calculateWallThickness(
+                  lock,
+                  { x: ap.x, y: ap.y, side: null, orientation: undefined },
+                  layout.walls
+                );
                 const baseRangePx = ap.range;
-                const crossPenaltyPx = params.crossPenalty * PX_PER_FT;
+                const crossPenaltyPx =
+                  params.crossPenalty * PX_PER_FT +
+                  wallCrosses.totalThickness * params.wallCrossPenalty;
 
                 const distScore = 1 - clamp01(dist / baseRangePx);
-                const obsScore =
-                  1 - clamp01((crosses * crossPenaltyPx) / baseRangePx);
+                const unitPenaltyPx = crosses * crossPenaltyPx;
+
+                const obsScore = 1 - clamp01(unitPenaltyPx / baseRangePx);
                 const quality = Math.min(distScore, obsScore); // conservative
 
                 let color;
@@ -748,7 +903,7 @@ export default function FacilityMap({
                     return a.dist - b.dist;
                   })
                   .slice(0, 14)
-                  .map(({ lock, dist, quality, color }, idx) => (
+                  .map(({ lock, dist, quality, color, wallCrosses }, idx) => (
                     <React.Fragment key={`ap-link-${ap.id}-${idx}`}>
                       <Line
                         points={[ap.x, ap.y, lock.x, lock.y]}

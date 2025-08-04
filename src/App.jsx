@@ -20,9 +20,30 @@ function App() {
   const [layout, setLayout] = useState({
     canvasSize: { width: 1200, height: 800 },
     units: [],
+    accessPoints: [],
+    walls: [
+      {
+        id: "7e22b584-82c3-4e17-9f66-31c4d90035f0",
+        x1: 125,
+        y1: 175,
+        x2: 225,
+        y2: 275,
+        thickness: 4,
+        color: "#3b9c07",
+      },
+      {
+        id: "5b29af11-b507-426c-8a66-b54fd0938bf6",
+        x1: 325,
+        y1: 275,
+        x2: 325,
+        y2: 375,
+        thickness: 4,
+        color: "#3b9c07",
+      },
+    ],
   });
   const [proximityPairs, setProximityPairs] = useState([]);
-  const [proximityText, setProximityText] = useState(true);
+  const [proximityText, setProximityText] = useState(false);
   const [reachability, setReachability] = useState({
     visited: new Set(),
     predecessor: {},
@@ -257,6 +278,11 @@ function App() {
     const baseOutConePx = params.baseOutCone * PX_PER_FT;
     const crossPenaltyPx = params.crossPenalty * PX_PER_FT;
 
+    // Check for wall blocking - if any wall blocks the line of sight, communication is blocked
+    if (isBlockedByWalls(lockA, lockB, layout.walls)) {
+      return false;
+    }
+
     // determine endpoint-containing units so we don't count them
     const endpointIds = new Set();
     for (const u of units) {
@@ -296,6 +322,79 @@ function App() {
       distPx <= adjRangePx(lockA, lockB) && distPx <= adjRangePx(lockB, lockA)
     );
   }
+
+  // Function to check if the line of sight between two locks is blocked by walls
+  function isBlockedByWalls(lockA, lockB, walls) {
+    if (!walls || walls.length === 0) return false;
+
+    for (const wall of walls) {
+      if (segmentIntersectsWall(lockA, lockB, wall)) {
+        return wall;
+      }
+    }
+    return false;
+  }
+
+  // Function to calculate the total thickness of walls crossed by a line segment
+  function calculateWallThickness(lockA, lockB, walls) {
+    if (!walls || walls.length === 0) return 0;
+
+    let totalThickness = 0;
+    const crossedWalls = [];
+
+    for (const wall of walls) {
+      if (segmentIntersectsWall(lockA, lockB, wall)) {
+        totalThickness += wall.thickness || 4; // default thickness of 4 if not specified
+        crossedWalls.push(wall);
+      }
+    }
+
+    return {
+      totalThickness,
+      wallCount: crossedWalls.length,
+      crossedWalls,
+    };
+  }
+
+  // Function to check if a line segment (between two locks) intersects with a wall
+  function segmentIntersectsWall(p1, p2, wall) {
+    // Wall is defined by two points (x1,y1) and (x2,y2) with thickness
+    // We need to check if the line segment p1-p2 intersects the wall line segment
+    const wallStart = { x: wall.x1, y: wall.y1 };
+    const wallEnd = { x: wall.x2, y: wall.y2 };
+
+    // Use the same segment intersection logic as existing code
+    const orient = (p, q, r) =>
+      (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+
+    const o1 = orient(p1, p2, wallStart);
+    const o2 = orient(p1, p2, wallEnd);
+    const o3 = orient(wallStart, wallEnd, p1);
+    const o4 = orient(wallStart, wallEnd, p2);
+
+    // General case - segments intersect if orientations are different
+    if (o1 > 0 !== o2 > 0 && o3 > 0 !== o4 > 0) {
+      return true;
+    }
+
+    // Special cases for collinear points
+    const onSegment = (p, q, r) => {
+      return (
+        Math.min(p.x, r.x) <= q.x &&
+        q.x <= Math.max(p.x, r.x) &&
+        Math.min(p.y, r.y) <= q.y &&
+        q.y <= Math.max(p.y, r.y)
+      );
+    };
+
+    if (o1 === 0 && onSegment(p1, wallStart, p2)) return true;
+    if (o2 === 0 && onSegment(p1, wallEnd, p2)) return true;
+    if (o3 === 0 && onSegment(wallStart, p1, wallEnd)) return true;
+    if (o4 === 0 && onSegment(wallStart, p2, wallEnd)) return true;
+
+    return false;
+  }
+
   function pointInRect(px, py, u) {
     return (
       px >= u.x && px <= u.x + u.width && py >= u.y && py <= u.y + u.height
@@ -736,6 +835,10 @@ function App() {
     const baseInConePx = params.baseInCone * PX_PER_FT;
     const baseOutConePx = params.baseOutCone * PX_PER_FT;
     const crossPenaltyPx = params.crossPenalty * PX_PER_FT;
+    let wallPenalty = 0;
+    // Check for wall blocking - if any wall blocks the line of sight, communication is blocked
+    if (isBlockedByWalls(lock, ap, layout.walls)) {
+    }
 
     // determine endpoint-containing unit for lock to exclude it from crossing count
     const endpointIds = new Set();
@@ -920,6 +1023,7 @@ function App() {
           pointInTriangle={pointInTriangle}
           countCrossedUnits={countCrossedUnits}
           clamp01={clamp01}
+          calculateWallThickness={calculateWallThickness}
         />
       </div>
     </div>

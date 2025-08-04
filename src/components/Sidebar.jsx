@@ -6,12 +6,10 @@ import {
   TbLayoutSidebarLeftCollapseFilled,
   TbLayoutSidebarRightCollapseFilled,
 } from "react-icons/tb";
-
+import CreateWallModal from "./CreateWallModal";
 export default function Sidebar({
   layout,
   setLayout,
-  handleParamChange,
-  params,
   findNearbyLocks,
   limitNearest,
   setLimitNearest,
@@ -20,9 +18,9 @@ export default function Sidebar({
   setProximityPairs,
   getAllLocks,
   computeReachability,
-  handleCanvasChange,
 }) {
   const [isCreateUnitModalOpen, setIsCreateUnitModalOpen] = useState(false);
+  const [isCreateWallModalOpen, setIsCreateWallModalOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const PX_PER_FT = 5;
 
@@ -53,6 +51,7 @@ export default function Sidebar({
     let totalRentableAreaFt2 = 0;
     let totalDoors = 0;
     let totalLocks = 0;
+    let totalAccessPoints = layout.accessPoints?.length || 0;
 
     for (const u of layout.units) {
       // area in ft²
@@ -72,8 +71,9 @@ export default function Sidebar({
       totalRentableAreaFt2,
       totalDoors,
       totalLocks,
+      totalAccessPoints,
     };
-  }, [layout.units]);
+  }, [layout]);
 
   const loadLayout1 = () => {
     setLayout((prev) => ({
@@ -115,6 +115,31 @@ export default function Sidebar({
     });
   };
 
+  const handleCreateWallSave = (wall) => {
+    setLayout((prev) => {
+      // enforce minimum size and snap everything to grid
+      const x1 = snap(wall.x1);
+      const y1 = snap(wall.y1);
+      const x2 = snap(wall.x2);
+      const y2 = snap(wall.y2);
+      const thickness = Math.max(1, Number(wall.thickness) || 1);
+
+      const normalized = {
+        ...wall,
+        x1,
+        y1,
+        x2,
+        y2,
+        thickness,
+      };
+
+      return {
+        ...prev,
+        walls: [...prev.walls, normalized],
+      };
+    });
+  };
+
   return (
     <div
       className={`
@@ -129,8 +154,15 @@ export default function Sidebar({
           onSave={handleCreateUnitSave}
         />
       )}
+      {isCreateWallModalOpen && (
+        <CreateWallModal
+          setIsCreateWallModalOpen={setIsCreateWallModalOpen}
+          walls={layout.walls}
+          onSave={handleCreateWallSave}
+        />
+      )}
       <div
-        className={`w-12 h-12 rounded-full absolute z-40 flex items-center justify-center cursor-pointer text-4xl top-4 bg-zinc-100 border ${
+        className={`w-12 h-12 rounded-full absolute z-40 flex items-center justify-center cursor-pointer text-4xl top-9 bg-zinc-50 border ${
           isCollapsed ? "-right-6" : "-right-6"
         }`}
         onClick={() => setIsCollapsed((c) => !c)}
@@ -165,6 +197,12 @@ export default function Sidebar({
               Add Access Point
             </button>
             <button
+              onClick={() => setIsCreateWallModalOpen(true)}
+              className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
+            >
+              Add Wall
+            </button>
+            <button
               className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
               onClick={findNearbyLocks}
             >
@@ -184,18 +222,27 @@ export default function Sidebar({
           </div>
           <div className="flex flex-col gap-2 mb-4">
             <button
-              className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
+              className={`w-full py-2  text-white rounded cursor-pointer ${
+                proximityText
+                  ? "bg-blue-600 hover:bg-blue-700"
+                  : "bg-red-600 hover:bg-red-700"
+              }`}
+              onClick={() => setProximityText(!proximityText)}
+            >
+              Distance Calculation {proximityText ? "On" : "Off"}
+            </button>
+            <button
+              className={`w-full py-2  text-white rounded cursor-pointer ${
+                limitNearest
+                  ? "bg-blue-600 hover:bg-blue-700"
+                  : "bg-red-600 hover:bg-red-700"
+              }`}
               onClick={() =>
                 setLimitNearest(!limitNearest) & setProximityPairs([])
               }
+              title="Limit distance lines to nearest 3 locks"
             >
-              Limit to 3 nearest: {limitNearest ? "On" : "Off"}
-            </button>
-            <button
-              className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
-              onClick={() => setProximityText(!proximityText)}
-            >
-              Turn Distance Calculation {proximityText ? "Off" : "On"}
+              Limit Links {limitNearest ? "On" : "Off"}
             </button>
             <button
               className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
@@ -209,7 +256,7 @@ export default function Sidebar({
               onClick={loadLayout1}
               className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
             >
-              Set Exmaple Layout
+              Set Example Layout
             </button>
           </div>
           {/* Info at the bottom */}
@@ -226,6 +273,9 @@ export default function Sidebar({
             </h2>
             <h2>
               <span>Total Locks:</span> {totals.totalLocks}
+            </h2>
+            <h2>
+              <span>Total Access Points:</span> {totals.totalAccessPoints}
             </h2>
           </div>
         </>
