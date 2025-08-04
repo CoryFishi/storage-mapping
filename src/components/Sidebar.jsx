@@ -8,6 +8,14 @@ export default function Sidebar({
   setLayout,
   handleParamChange,
   params,
+  findNearbyLocks,
+  limitNearest,
+  setLimitNearest,
+  proximityText,
+  setProximityText,
+  setProximityPairs,
+  getAllLocks,
+  computeReachability,
 }) {
   const [isCreateUnitModalOpen, setIsCreateUnitModalOpen] = useState(false);
 
@@ -102,7 +110,7 @@ export default function Sidebar({
   };
 
   return (
-    <div className="h-screen w-64 bg-gray-100 border-r p-4 space-y-4">
+    <div className="h-screen flex gap-2 flex-col w-64 bg-gray-100 border-r p-4">
       {isCreateUnitModalOpen && (
         <CreateUnitModal
           setIsCreateUnitModalOpen={setIsCreateUnitModalOpen}
@@ -113,24 +121,57 @@ export default function Sidebar({
       <div className="flex flex-col gap-2 flex-wrap">
         <button
           onClick={() => setIsCreateUnitModalOpen(true)}
-          className="w-full py-2 bg-blue-600 text-white rounded"
+          className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
         >
-          Create New Unit
+          Add Unit
         </button>
-
+        <button
+          className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
+          onClick={() => addAccessPoint()}
+        >
+          Add Access Point
+        </button>
         <button
           onClick={loadLayout1}
-          className="w-full py-2 bg-blue-600 text-white rounded"
+          className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
         >
           Set Facility Layout 1
         </button>
+        <button
+          className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
+          onClick={findNearbyLocks}
+        >
+          Find Nearby Locks
+        </button>
+        <button
+          className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
+          onClick={() => setLimitNearest(!limitNearest) & setProximityPairs([])}
+        >
+          Limit to 3 nearest: {limitNearest ? "On" : "Off"}
+        </button>
+        <button
+          className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
+          onClick={() => setProximityText(!proximityText)}
+        >
+          Turn Distance Calculation {proximityText ? "Off" : "On"}
+        </button>
+        <button
+          className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
+          onClick={() => setProximityPairs([]) & console.log(layout.units)}
+        >
+          Clear Distance Lines
+        </button>
+        <button
+          className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
+          onClick={() => {
+            const locks = getAllLocks();
+            if (locks.length === 0) return;
+            computeReachability(50);
+          }}
+        >
+          Compute Reachability from 50th Lock
+        </button>
       </div>
-      <button
-        className="absolute top-72 right-2 z-20 bg-indigo-600 text-white px-3 py-1 rounded"
-        onClick={() => addAccessPoint()}
-      >
-        Add Access Point
-      </button>
 
       <div className="flex flex-col gap-1">
         <label className="text-xs">
