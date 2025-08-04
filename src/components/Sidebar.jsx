@@ -1,6 +1,7 @@
 import layoutUnits from "../utils/facility1.json";
 import { useMemo, useState } from "react";
 import CreateUnitModal from "./CreateUnitModal";
+import { v4 as uuid } from "uuid";
 
 export default function Sidebar({
   layout,
@@ -11,6 +12,27 @@ export default function Sidebar({
   const [isCreateUnitModalOpen, setIsCreateUnitModalOpen] = useState(false);
 
   const PX_PER_FT = 5;
+
+  // Helper to add an access point (e.g., put at center or anywhere)
+  const addAccessPoint = (
+    x = layout.canvasSize.width / 2,
+    y = layout.canvasSize.height / 2
+  ) => {
+    setLayout((prev) => ({
+      ...prev,
+      accessPoints: [
+        ...(prev.accessPoints || []),
+        {
+          id: uuid(),
+          label: `AP ${(prev.accessPoints?.length || 0) + 1}`,
+          x,
+          y,
+          range: 250, // px
+          color: "#22c55e", // greenish
+        },
+      ],
+    }));
+  };
 
   const totals = useMemo(() => {
     let totalUnits = layout.units.length;
@@ -103,6 +125,13 @@ export default function Sidebar({
           Set Facility Layout 1
         </button>
       </div>
+      <button
+        className="absolute top-72 right-2 z-20 bg-indigo-600 text-white px-3 py-1 rounded"
+        onClick={() => addAccessPoint()}
+      >
+        Add Access Point
+      </button>
+
       <div className="flex flex-col gap-1">
         <label className="text-xs">
           In-cone range (ft)

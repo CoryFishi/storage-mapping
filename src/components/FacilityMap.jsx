@@ -525,6 +525,57 @@ export default function FacilityMap({
   function clamp01(x) {
     return Math.max(0, Math.min(1, x));
   }
+  function locksInRangeOfAP(ap, locks) {
+    return locks.filter((lock) => {
+      const dx = lock.x - ap.x;
+      const dy = lock.y - ap.y;
+      return Math.hypot(dx, dy) <= ap.range;
+    });
+  }
+  // AP is treated as omnidirectional; only the lock's cone + crossings matter.
+  function canLockTalkToAP(lock, ap, units, params, cosHalfAngle) {
+    const dx = ap.x - lock.x;
+    const dy = ap.y - lock.y;
+    const distPx = Math.hypot(dx, dy);
+
+    const baseInConePx = params.baseInCone * PX_PER_FT;
+    const baseOutConePx = params.baseOutCone * PX_PER_FT;
+    const crossPenaltyPx = params.crossPenalty * PX_PER_FT;
+
+    // determine endpoint-containing unit for lock to exclude it from crossing count
+    const endpointIds = new Set();
+    for (const u of units) {
+      const containsLock =
+        u.shape === "rightTriangle"
+          ? pointInTriangle(lock.x, lock.y, u)
+          : pointInRect(lock.x, lock.y, u);
+      if (containsLock) endpointIds.add(u.id);
+    }
+
+    const crosses = countCrossedUnits(
+      { x: lock.x, y: lock.y, side: lock.side, orientation: lock.orientation },
+      { x: ap.x, y: ap.y },
+      units,
+      endpointIds
+    );
+    const penaltyPx = crosses * crossPenaltyPx;
+
+    // cone test for lock (AP is omnidirectional so we don't test its cone)
+    const n =
+      lock.side === "hypotenuse"
+        ? HYPOTENUSE_NORMALS[lock.orientation || "nw"]
+        : NORMALS[lock.side];
+    if (!n) return false; // safety
+
+    const vx = ap.x - lock.x;
+    const vy = ap.y - lock.y;
+    const dot = vx * n.x + vy * n.y;
+    const dist = distPx;
+    const inFront = dot > 0 && dist > 0 && dot / dist >= cosHalfAngle;
+    const base = inFront ? baseInConePx : baseOutConePx;
+    const allowedRange = Math.max(0, base - penaltyPx);
+    return distPx <= allowedRange;
+  }
 
   function findNearbyLocks() {
     const locks = [];
@@ -1249,7 +1300,6 @@ export default function FacilityMap({
             })()}
           </Layer>
         )}
-
         {tooltip.visible && (
           <Layer>
             <Label x={tooltip.x} y={tooltip.y} listening={false}>
@@ -1269,6 +1319,78 @@ export default function FacilityMap({
             </Label>
           </Layer>
         )}
+        <Layer>
+          {(layout.accessPoints || []).map((ap) => (
+            <React.Fragment key={ap.id}>
+              {/* Range disc */}
+              <Circle
+                x={ap.x}
+                y={ap.y}
+                radius={ap.range}
+                stroke="rgba(34, 197, 94, 0.7)"
+                strokeWidth={2}
+                fill="rgba(34, 197, 94, 0.15)"
+                listening={false}
+              />
+              {/* Access point marker */}
+              <Circle
+                x={ap.x}
+                y={ap.y}
+                radius={8}
+                fill={ap.color}
+                stroke="#000"
+                strokeWidth={1}
+                draggable
+                onDragEnd={(e) => {
+                  const newX = snap(e.target.x());
+                  const newY = snap(e.target.y());
+                  setLayout((prev) => ({
+                    ...prev,
+                    accessPoints: (prev.accessPoints || []).map((p) =>
+                      p.id === ap.id ? { ...p, x: newX, y: newY } : p
+                    ),
+                  }));
+                }}
+                onClick={() => {
+                  // e.g., set as selected AP, or compute coverage
+                }}
+              />
+              <Text
+                text={ap.label}
+                fontSize={12}
+                x={ap.x + 10}
+                y={ap.y - 12}
+                listening={false}
+              />
+            </React.Fragment>
+          ))}
+          {(layout.accessPoints || []).map((ap) => {
+            const allLocks = getAllLocks(); // your existing function that returns locks with x,y,side,orientation
+            const inRangeLocks = allLocks.filter((lock) => {
+              const dist = Math.hypot(lock.x - ap.x, lock.y - ap.y);
+              if (dist > ap.range) return false; // outside AP radius
+              if (
+                !canLockTalkToAP(lock, ap, layout.units, params, cosHalfAngle)
+              )
+                return false;
+              return true;
+            });
+
+            return (
+              <React.Fragment key={ap.id}>
+                {inRangeLocks.map((lock, idx) => (
+                  <Line
+                    key={`ap-link-${ap.id}-${idx}`}
+                    points={[ap.x, ap.y, lock.x, lock.y]}
+                    stroke="cyan"
+                    strokeWidth={1}
+                    dash={[2, 4]}
+                  />
+                ))}
+              </React.Fragment>
+            );
+          })}
+        </Layer>
       </Stage>
     </div>
   );
