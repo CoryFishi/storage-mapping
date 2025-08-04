@@ -12,6 +12,7 @@ import {
   Tag,
 } from "react-konva";
 import { v4 as uuid } from "uuid";
+import EditAccessPointModal from "./EditAccessPointModal";
 
 const PX_PER_FT = 5;
 
@@ -22,17 +23,18 @@ export default function FacilityMap({
   setIsUnitModalOpen,
   setLayout,
   params,
-  cosHalfAngle,
   proximityPairs,
   proximityText,
   getTriangleCorners,
   hasTriangleSide,
   getTriangleLockPos,
   getAllLocks,
-  computeReachability,
   rootLockIndex,
   reachability,
-  canLockTalkToAP,
+  pointInRect,
+  pointInTriangle,
+  countCrossedUnits,
+  clamp01,
 }) {
   const [selectedId, setSelectedId] = useState(null);
   const [tooltip, setTooltip] = useState({
@@ -44,6 +46,9 @@ export default function FacilityMap({
   const trRef = useRef();
   const stageRef = useRef();
   const [clipboard, setClipboard] = useState(null);
+  const [isEditAccessPointModalOpen, setIsEditAccessPointModalOpen] =
+    useState(false);
+  const [editAccessPoint, setEditAccessPoint] = useState(null);
 
   const gridSize = 25;
 
@@ -99,6 +104,20 @@ export default function FacilityMap({
   }, [selectedId, layout]);
   return (
     <div className="relative w-full h-full">
+      {isEditAccessPointModalOpen && (
+        <EditAccessPointModal
+          accesspoint={editAccessPoint}
+          setIsEditAccessPointModalOpen={setIsEditAccessPointModalOpen}
+          onSave={(updated) => {
+            setLayout((prev) => ({
+              ...prev,
+              accessPoints: prev.accessPoints.map((u) =>
+                u.id === updated.id ? updated : u
+              ),
+            }));
+          }}
+        />
+      )}
       <Stage
         width={layout.canvasSize.width}
         height={layout.canvasSize.height}
@@ -583,15 +602,58 @@ export default function FacilityMap({
           {(layout.accessPoints || []).map((ap) => (
             <React.Fragment key={ap.id}>
               {/* Range disc */}
-              <Circle
-                x={ap.x}
-                y={ap.y}
-                radius={ap.range}
-                stroke="rgba(34, 197, 94, 0.7)"
-                strokeWidth={2}
-                fill="rgba(34, 197, 94, 0.15)"
-                listening={false}
-              />
+              {ap.showRange && (
+                <>
+                  <Text
+                    text={`${Math.round(ap.range / PX_PER_FT)} ft`}
+                    fontSize={12}
+                    x={ap.x + ap.range + 2}
+                    y={ap.y}
+                    listening={false}
+                  />
+                  <Circle
+                    x={ap.x}
+                    y={ap.y}
+                    radius={ap.range}
+                    stroke="rgba(200, 0, 0, 0.7)"
+                    strokeWidth={2}
+                    fill="rgba(200, 0, 0, 0.15)"
+                    listening={false}
+                  />
+                  <Text
+                    text={`${Math.round(ap.range / 1.5 / PX_PER_FT)} ft`}
+                    fontSize={12}
+                    x={ap.x + ap.range / 1.5 + 2}
+                    y={ap.y}
+                    listening={false}
+                  />
+                  <Circle
+                    x={ap.x}
+                    y={ap.y}
+                    radius={ap.range / 1.5}
+                    stroke="rgba(200, 200, 0, 0.7)"
+                    strokeWidth={2}
+                    fill="rgba(200, 200, 0, 0.15)"
+                    listening={false}
+                  />
+                  <Text
+                    text={`${Math.round(ap.range / 2.5 / PX_PER_FT)} ft`}
+                    fontSize={12}
+                    x={ap.x + ap.range / 2.5 + 2}
+                    y={ap.y}
+                    listening={false}
+                  />
+                  <Circle
+                    x={ap.x}
+                    y={ap.y}
+                    radius={ap.range / 2.5}
+                    stroke="rgba(34, 197, 94, 0.7)"
+                    strokeWidth={2}
+                    fill="rgba(34, 197, 94, 0.15)"
+                    listening={false}
+                  />
+                </>
+              )}
               {/* Access point marker */}
               <Circle
                 x={ap.x}
@@ -611,8 +673,19 @@ export default function FacilityMap({
                     ),
                   }));
                 }}
-                onClick={() => {
-                  // e.g., set as selected AP, or compute coverage
+                onDblClick={(e) => {
+                  e.cancelBubble = true;
+                  setIsEditAccessPointModalOpen(true);
+                  setEditAccessPoint(ap);
+                  console.log(ap);
+                }}
+                onClick={(e) => {
+                  setLayout((prev) => ({
+                    ...prev,
+                    accessPoints: (prev.accessPoints || []).map((p) =>
+                      p.id === ap.id ? { ...p, showRange: !ap.showRange } : p
+                    ),
+                  }));
                 }}
               />
               <Text
@@ -625,28 +698,78 @@ export default function FacilityMap({
             </React.Fragment>
           ))}
           {(layout.accessPoints || []).map((ap) => {
-            const allLocks = getAllLocks(); // your existing function that returns locks with x,y,side,orientation
-            const inRangeLocks = allLocks.filter((lock) => {
-              const dist = Math.hypot(lock.x - ap.x, lock.y - ap.y);
-              if (dist > ap.range) return false; // outside AP radius
-              if (
-                !canLockTalkToAP(lock, ap, layout.units, params, cosHalfAngle)
-              )
-                return false;
-              return true;
-            });
+            const allLocks = getAllLocks();
+
+            const links = allLocks
+              .map((lock) => {
+                const dist = Math.hypot(lock.x - ap.x, lock.y - ap.y); // pixel distance
+                if (dist > ap.range) return null;
+
+                // endpoint: lock is inside some unit(s); AP is not a unit so only exclude the lock's containing unit(s)
+                const endpointIds = new Set();
+                for (const u of layout.units) {
+                  const containsLock =
+                    u.shape === "rightTriangle"
+                      ? pointInTriangle(lock.x, lock.y, u)
+                      : pointInRect(lock.x, lock.y, u);
+                  if (containsLock) endpointIds.add(u.id);
+                }
+
+                // count crossed units between lock and AP
+                const crosses = countCrossedUnits(
+                  lock,
+                  { x: ap.x, y: ap.y, side: null, orientation: undefined },
+                  layout.units,
+                  endpointIds
+                );
+
+                const baseRangePx = ap.range;
+                const crossPenaltyPx = params.crossPenalty * PX_PER_FT;
+
+                const distScore = 1 - clamp01(dist / baseRangePx);
+                const obsScore =
+                  1 - clamp01((crosses * crossPenaltyPx) / baseRangePx);
+                const quality = Math.min(distScore, obsScore); // conservative
+
+                let color;
+                if (quality > 0.75) color = "green";
+                else if (quality > 0.4) color = "orange";
+                else color = "red";
+
+                return { lock, dist, quality, color, crosses };
+              })
+              .filter(Boolean);
 
             return (
               <React.Fragment key={ap.id}>
-                {inRangeLocks.map((lock, idx) => (
-                  <Line
-                    key={`ap-link-${ap.id}-${idx}`}
-                    points={[ap.x, ap.y, lock.x, lock.y]}
-                    stroke="cyan"
-                    strokeWidth={1}
-                    dash={[2, 4]}
-                  />
-                ))}
+                {links
+                  .sort((a, b) => {
+                    if (b.quality !== a.quality) return b.quality - a.quality;
+                    return a.dist - b.dist;
+                  })
+                  .slice(0, 14)
+                  .map(({ lock, dist, quality, color }, idx) => (
+                    <React.Fragment key={`ap-link-${ap.id}-${idx}`}>
+                      <Line
+                        points={[ap.x, ap.y, lock.x, lock.y]}
+                        stroke={color}
+                        strokeWidth={Math.max(1, quality * 3)}
+                        dash={[2, 4]}
+                      />
+                      {proximityText && (
+                        <Text
+                          text={`${Math.round(
+                            dist / PX_PER_FT
+                          )} ft \n${Math.round(quality * 100)}%`}
+                          fontSize={12}
+                          fill="black"
+                          x={(ap.x + lock.x) / 2 + 5}
+                          y={(ap.y + lock.y) / 2 - 10}
+                          listening={false}
+                        />
+                      )}
+                    </React.Fragment>
+                  ))}
               </React.Fragment>
             );
           })}

@@ -2,6 +2,10 @@ import layoutUnits from "../utils/facility1.json";
 import { useMemo, useState } from "react";
 import CreateUnitModal from "./CreateUnitModal";
 import { v4 as uuid } from "uuid";
+import {
+  TbLayoutSidebarLeftCollapseFilled,
+  TbLayoutSidebarRightCollapseFilled,
+} from "react-icons/tb";
 
 export default function Sidebar({
   layout,
@@ -16,9 +20,10 @@ export default function Sidebar({
   setProximityPairs,
   getAllLocks,
   computeReachability,
+  handleCanvasChange,
 }) {
   const [isCreateUnitModalOpen, setIsCreateUnitModalOpen] = useState(false);
-
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const PX_PER_FT = 5;
 
   // Helper to add an access point (e.g., put at center or anywhere)
@@ -35,8 +40,9 @@ export default function Sidebar({
           label: `AP ${(prev.accessPoints?.length || 0) + 1}`,
           x,
           y,
-          range: 250, // px
-          color: "#22c55e", // greenish
+          range: 750,
+          showRange: false,
+          color: "#22c55e",
         },
       ],
     }));
@@ -110,7 +116,12 @@ export default function Sidebar({
   };
 
   return (
-    <div className="h-screen flex gap-2 flex-col w-64 bg-gray-100 border-r p-4">
+    <div
+      className={`
+        h-screen flex flex-col bg-gray-100 border-r relative
+        ${isCollapsed ? "w-0" : "min-w-72 p-4"}
+      `}
+    >
       {isCreateUnitModalOpen && (
         <CreateUnitModal
           setIsCreateUnitModalOpen={setIsCreateUnitModalOpen}
@@ -118,114 +129,107 @@ export default function Sidebar({
           onSave={handleCreateUnitSave}
         />
       )}
-      <div className="flex flex-col gap-2 flex-wrap">
-        <button
-          onClick={() => setIsCreateUnitModalOpen(true)}
-          className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
-        >
-          Add Unit
-        </button>
-        <button
-          className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
-          onClick={() => addAccessPoint()}
-        >
-          Add Access Point
-        </button>
-        <button
-          onClick={loadLayout1}
-          className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
-        >
-          Set Facility Layout 1
-        </button>
-        <button
-          className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
-          onClick={findNearbyLocks}
-        >
-          Find Nearby Locks
-        </button>
-        <button
-          className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
-          onClick={() => setLimitNearest(!limitNearest) & setProximityPairs([])}
-        >
-          Limit to 3 nearest: {limitNearest ? "On" : "Off"}
-        </button>
-        <button
-          className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
-          onClick={() => setProximityText(!proximityText)}
-        >
-          Turn Distance Calculation {proximityText ? "Off" : "On"}
-        </button>
-        <button
-          className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
-          onClick={() => setProximityPairs([]) & console.log(layout.units)}
-        >
-          Clear Distance Lines
-        </button>
-        <button
-          className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
-          onClick={() => {
-            const locks = getAllLocks();
-            if (locks.length === 0) return;
-            computeReachability(50);
-          }}
-        >
-          Compute Reachability from 50th Lock
-        </button>
+      <div
+        className={`w-12 h-12 rounded-full absolute z-40 flex items-center justify-center cursor-pointer text-4xl top-4 bg-zinc-100 border ${
+          isCollapsed ? "-right-6" : "-right-6"
+        }`}
+        onClick={() => setIsCollapsed((c) => !c)}
+      >
+        {isCollapsed ? (
+          <TbLayoutSidebarRightCollapseFilled />
+        ) : (
+          <TbLayoutSidebarLeftCollapseFilled />
+        )}
       </div>
+      {!isCollapsed && (
+        <>
+          <div
+            className="flex gap-2 items-center select-none justify-center mb-4"
+            onClick={() => console.log(layout)}
+          >
+            <img src="map-pointer.svg" alt="" className="w-12 h-12" />
+            <h2 className="text-xl font-bold">StorLock Mapping</h2>
+          </div>
+          {/* Buttons at the top */}
+          <div className="flex flex-col gap-2 flex-wrap mb-4">
+            <button
+              onClick={() => setIsCreateUnitModalOpen(true)}
+              className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
+            >
+              Add Unit
+            </button>
+            <button
+              className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
+              onClick={() => addAccessPoint()}
+            >
+              Add Access Point
+            </button>
+            <button
+              className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
+              onClick={findNearbyLocks}
+            >
+              Find Nearby Locks
+            </button>
 
-      <div className="flex flex-col gap-1">
-        <label className="text-xs">
-          In-cone range (ft)
-          <input
-            type="number"
-            value={params.baseInCone}
-            onChange={handleParamChange("baseInCone")}
-            className="w-full border px-1 rounded"
-          />
-        </label>
-        <label className="text-xs">
-          Out-of-cone range (ft)
-          <input
-            type="number"
-            value={params.baseOutCone}
-            onChange={handleParamChange("baseOutCone")}
-            className="w-full border px-1 rounded"
-          />
-        </label>
-        <label className="text-xs">
-          Cross penalty (ft)
-          <input
-            type="number"
-            value={params.crossPenalty}
-            onChange={handleParamChange("crossPenalty")}
-            className="w-full border px-1 rounded"
-          />
-        </label>
-        <label className="text-xs">
-          Half cone angle (deg)
-          <input
-            type="number"
-            value={params.halfConeDeg}
-            onChange={handleParamChange("halfConeDeg")}
-            className="w-full border px-1 rounded"
-          />
-        </label>
-      </div>
-      <div className="flex flex-col gap-1 text-sm">
-        <h2>
-          <span>Total Units:</span> {totals.totalUnits}
-        </h2>
-        <h2>
-          <span>Total Rentable Space:</span>{" "}
-          {Math.round(totals.totalRentableAreaFt2 * 100) / 100} ft²
-        </h2>
-        <h2>
-          <span>Total Doors:</span> {totals.totalDoors}
-        </h2>
-        <h2>
-          <span>Total Locks:</span> {totals.totalLocks}
-        </h2>
-      </div>
+            <button
+              className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
+              onClick={() => {
+                const locks = getAllLocks();
+                if (locks.length === 0) return;
+                computeReachability(50);
+              }}
+            >
+              Reachability from 50th Lock
+            </button>
+          </div>
+          <div className="flex flex-col gap-2 mb-4">
+            <button
+              className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
+              onClick={() =>
+                setLimitNearest(!limitNearest) & setProximityPairs([])
+              }
+            >
+              Limit to 3 nearest: {limitNearest ? "On" : "Off"}
+            </button>
+            <button
+              className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
+              onClick={() => setProximityText(!proximityText)}
+            >
+              Turn Distance Calculation {proximityText ? "Off" : "On"}
+            </button>
+            <button
+              className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
+              onClick={() => setProximityPairs([]) & console.log(layout.units)}
+            >
+              Clear Distance Lines
+            </button>
+          </div>
+          <div className="flex flex-col">
+            <button
+              onClick={loadLayout1}
+              className="w-full py-2 bg-blue-600 text-white rounded cursor-pointer"
+            >
+              Set Exmaple Layout
+            </button>
+          </div>
+          {/* Info at the bottom */}
+          <div className="flex flex-col gap-1 text-sm mt-auto">
+            <h2>
+              <span>Total Units:</span> {totals.totalUnits}
+            </h2>
+            <h2>
+              <span>Total Rentable Space:</span>{" "}
+              {Math.round(totals.totalRentableAreaFt2 * 100) / 100} ft²
+            </h2>
+            <h2>
+              <span>Total Doors:</span> {totals.totalDoors}
+            </h2>
+            <h2>
+              <span>Total Locks:</span> {totals.totalLocks}
+            </h2>
+          </div>
+        </>
+      )}
     </div>
   );
 }

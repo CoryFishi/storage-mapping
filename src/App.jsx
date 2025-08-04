@@ -2,7 +2,8 @@ import { useState, useCallback, useMemo } from "react";
 import FacilityMap from "./components/FacilityMap";
 import Sidebar from "./components/Sidebar";
 import { applyChange } from "./utils/applyChange";
-import UnitModal from "./components/UnitModal";
+import EditUnitModal from "./components/EditUnitModal";
+import { GrSettingsOption } from "react-icons/gr";
 
 const PX_PER_FT = 5;
 
@@ -27,6 +28,7 @@ function App() {
     predecessor: {},
   });
   const [rootLockIndex, setRootLockIndex] = useState(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Map door side to a unit-vector normal
   const NORMALS = {
@@ -49,7 +51,6 @@ function App() {
   const handleUpdate = useCallback((type, id, props) => {
     setLayout((prev) => applyChange(prev, type, id, props));
   }, []);
-
   const handleSaveUnit = useCallback((updatedUnit) => {
     setLayout((prev) => ({
       ...prev,
@@ -775,14 +776,96 @@ function App() {
     if (isNaN(val)) return;
     setParams((p) => ({ ...p, [field]: val }));
   };
+  const handleCanvasChange = (field) => (e) => {
+    const val = parseFloat(e.target.value) * 5;
+    if (isNaN(val)) return;
+    setLayout((prev) => ({
+      ...prev,
+      canvasSize: {
+        ...prev.canvasSize,
+        [field]: val,
+      },
+    }));
+  };
   return (
-    <div className="flex h-screen bg-gray-100 ">
+    <div className="flex h-screen bg-gray-100 relative">
       {isUnitModalOpen && (
-        <UnitModal
+        <EditUnitModal
           unit={unitModalUnit}
           onSave={handleSaveUnit}
           setIsUnitModalOpen={setIsUnitModalOpen}
         />
+      )}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-96 bg-white rounded p-4 border">
+            <h2>Settings</h2>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs">
+                Canvas Width (ft)
+                <input
+                  type="number"
+                  value={layout.canvasSize.width / 5}
+                  onChange={handleCanvasChange("width")}
+                  className="w-full border px-1 rounded"
+                />
+              </label>
+              <label className="text-xs">
+                Canvas Height (ft)
+                <input
+                  type="number"
+                  value={layout.canvasSize.height / 5}
+                  onChange={handleCanvasChange("height")}
+                  className="w-full border px-1 rounded"
+                />
+              </label>
+              <label className="text-xs">
+                SmartLock In-cone range (ft)
+                <input
+                  type="number"
+                  value={params.baseInCone}
+                  onChange={handleParamChange("baseInCone")}
+                  className="w-full border px-1 rounded"
+                />
+              </label>
+              <label className="text-xs">
+                SmartLock Out-of-cone range (ft)
+                <input
+                  type="number"
+                  value={params.baseOutCone}
+                  onChange={handleParamChange("baseOutCone")}
+                  className="w-full border px-1 rounded"
+                />
+              </label>
+              <label className="text-xs">
+                SmartLock Half cone angle (deg)
+                <input
+                  type="number"
+                  value={params.halfConeDeg}
+                  onChange={handleParamChange("halfConeDeg")}
+                  className="w-full border px-1 rounded"
+                />
+              </label>
+              <label className="text-xs">
+                Cross penalty (ft)
+                <input
+                  type="number"
+                  value={params.crossPenalty}
+                  onChange={handleParamChange("crossPenalty")}
+                  className="w-full border px-1 rounded"
+                />
+              </label>
+            </div>
+            <div className="flex justify-evenly mt-6">
+              <button
+                className="bg-zinc-500 hover:bg-zinc-600 text-white px-4 py-2 rounded cursor-pointer"
+                onClick={() => setIsSettingsOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       <Sidebar
         layout={layout}
@@ -797,7 +880,15 @@ function App() {
         proximityText={proximityText}
         getAllLocks={getAllLocks}
         computeReachability={computeReachability}
+        handleCanvasChange={handleCanvasChange}
       />
+      <div
+        className="w-12 h-12 rounded-full bg-zinc-200 bottom-2 right-2 absolute border flex items-center justify-center text-3xl cursor-pointer hover:bg-zinc-300"
+        title="Click to open settings"
+        onClick={() => setIsSettingsOpen(true)}
+      >
+        <GrSettingsOption />
+      </div>
       <div
         className={`p-2 h-[${layout.canvasSize.height}] w-[${layout.canvasSize.width}]`}
       >
@@ -825,6 +916,10 @@ function App() {
           rootLockIndex={rootLockIndex}
           reachability={reachability}
           canLockTalkToAP={canLockTalkToAP}
+          pointInRect={pointInRect}
+          pointInTriangle={pointInTriangle}
+          countCrossedUnits={countCrossedUnits}
+          clamp01={clamp01}
         />
       </div>
     </div>

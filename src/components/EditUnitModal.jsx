@@ -2,7 +2,7 @@ import { useState } from "react";
 
 const PX_PER_FT = 5;
 
-export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
+export default function EditUnitModal({ unit, setIsUnitModalOpen, onSave }) {
   const [newUnit, setNewUnit] = useState({ ...unit });
   const toFeetDisplay = (px) => {
     return Math.round((px / PX_PER_FT) * 10) / 10;
@@ -20,7 +20,6 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
       setNewUnit((prev) => ({ ...prev, [field]: raw }));
     }
   };
-
   const toggleDoor = (side) => {
     setNewUnit((prev) => {
       const has = prev.doors?.some((d) => d.side === side);
@@ -30,7 +29,6 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
       return { ...prev, doors };
     });
   };
-
   const sides = ["top", "right", "bottom", "left", "hypotenuse"];
   const TRIANGLE_ALLOWED = {
     nw: ["top", "left", "hypotenuse"],
@@ -42,7 +40,6 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-96 bg-white rounded p-4 border">
         <h2 className="font-semibold text-center mb-4">Edit Unit {unit.id}</h2>
-
         <div className="space-y-3">
           {/* Label */}
           <div className="flex items-center">
@@ -54,7 +51,6 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
               className="border rounded px-2 py-1 w-2/3"
             />
           </div>
-
           {/* Width */}
           <div className="flex items-center">
             <label className="w-1/3 text-center">Width</label>
@@ -65,7 +61,6 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
               className="border rounded px-2 py-1 w-2/3"
             />
           </div>
-
           {/* Height */}
           <div className="flex items-center">
             <label className="w-1/3 text-center">Height</label>
@@ -76,7 +71,6 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
               className="border rounded px-2 py-1 w-2/3"
             />
           </div>
-
           {/* X Pos */}
           <div className="flex items-center">
             <label className="w-1/3 text-center">X Pos</label>
@@ -87,7 +81,6 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
               className="border rounded px-2 py-1 w-2/3"
             />
           </div>
-
           {/* Y Pos */}
           <div className="flex items-center">
             <label className="w-1/3 text-center">Y Pos</label>
@@ -98,7 +91,6 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
               className="border rounded px-2 py-1 w-2/3"
             />
           </div>
-
           {/* Color */}
           <div className="flex items-center">
             <label className="w-1/3 text-center">Color</label>
@@ -109,33 +101,30 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
               className="w-2/3 h-10 rounded"
             />
           </div>
-
           <div className="mt-4">
             <div className="text-center font-medium mb-1">Doors</div>
             <div className="flex justify-center gap-2">
               {sides.map((side) => {
                 const active = newUnit.doors?.some((d) => d.side === side);
-
                 // square doesn't get a hypotenuse side
                 if (newUnit.shape === "Square" && side === "hypotenuse")
                   return null;
                 if (newUnit.shape === "square" && side === "hypotenuse")
                   return null;
-
                 // triangle: only allow sides valid for its orientation
                 if (newUnit.shape === "rightTriangle") {
                   const orient = newUnit.orientation || "nw"; // default if missing
                   if (!TRIANGLE_ALLOWED[orient]?.includes(side)) return null;
                 }
-
                 return (
                   <button
                     key={side}
                     onClick={() => toggleDoor(side)}
-                    className={`
-        px-3 py-1 border rounded
-        ${active ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}
-      `}
+                    className={`px-3 py-1 border rounded ${
+                      active
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-200 text-gray-700"
+                    }`}
                   >
                     {side.charAt(0).toUpperCase() + side.slice(1)}
                   </button>
@@ -157,10 +146,11 @@ export default function UnitModal({ unit, setIsUnitModalOpen, onSave }) {
                         ),
                       }));
                     }}
-                    className={`
-            px-3 py-1 border rounded
-            ${active ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}
-          `}
+                    className={`px-3 py-1 border rounded ${
+                      active
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-200 text-gray-700"
+                    }`}
                   >
                     {door.side.charAt(0).toUpperCase() + door.side.slice(1)}
                   </button>
